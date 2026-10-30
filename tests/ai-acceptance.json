@@ -1,0 +1,42 @@
+[
+  {
+    "query": "that AI workshop last spring",
+    "expectedTitleSubstring": "AI Workshop"
+  },
+  {
+    "query": "Machine Learning in Education Workshop",
+    "expectedTitleSubstring": "Machine Learning in Education Workshop"
+  },
+  {
+    "query": "events I hosted last month",
+    "expectedType": "HOSTED"
+  },
+  {
+    "query": "busy days this semester",
+    "expectedType": "BUSY"
+  },
+  {
+    "query": "conference on quantum computing",
+    "expectedTitleSubstring": "National Conference on Quantum Computing"
+  },
+  {
+    "query": "guest lecture by Dr. Rao",
+    "expectedTitleSubstring": "Guest Lecture on Sustainable Engineering"
+  },
+  {
+    "query": "something in Main Seminar Hall",
+    "expectedLocation": "Main Seminar Hall"
+  },
+  {
+    "query": "curriculum review meeting I organized",
+    "expectedTitleSubstring": "Department Curriculum Review Meeting"
+  },
+  {
+    "query": "hackathon mentorship panel",
+    "expectedTitleSubstring": "Hackathon Mentorship & Judging Panel"
+  },
+  {
+    "query": "research ethics seminar attended",
+    "expectedTitleSubstring": "Faculty Research Ethics Seminar"
+  }
+]

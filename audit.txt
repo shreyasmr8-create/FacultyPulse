@@ -1,0 +1,3883 @@
+=== prisma/schema.prisma ===
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum EventType {
+  ATTENDED
+  HOSTED
+  BUSY
+}
+
+model Faculty {
+  id           String   @id @default(cuid())
+  facultyCode  String   @unique
+  fullName     String
+  email        String   @unique
+  department   String
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  events       Event[]
+  resetTokens  PasswordResetToken[]
+}
+
+model Event {
+  id            String    @id @default(cuid())
+  facultyId     String
+  faculty       Faculty   @relation(fields: [facultyId], references: [id], onDelete: Cascade)
+
+  title         String
+  type          EventType
+  startAt       DateTime
+  endAt         DateTime
+  allDay        Boolean   @default(false)
+  location      String?
+  department    String?
+  organizer     String?
+  role          String?
+  description   String?
+  attachmentUrl String?
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([facultyId, startAt])
+  @@index([facultyId, type])
+}
+
+model PasswordResetToken {
+  id          String   @id @default(cuid())
+  facultyId   String
+  faculty     Faculty  @relation(fields: [facultyId], references: [id], onDelete: Cascade)
+  tokenHash   String   @unique
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdAt   DateTime @default(now())
+}
+
+=== prisma/seed.ts ===
+import { PrismaClient, EventType } from "@prisma/client";
+import { subDays, addDays, addHours, startOfHour } from "date-fns";
+import { hashPassword } from "../lib/auth/password";
+
+const prisma = new PrismaClient();
+
+const LOCATIONS = [
+  "Main Seminar Hall",
+  "Auditorium Block A",
+  "CS Lab 302",
+  "Conference Room B",
+  "Central Library Hall",
+  "Innovation Center",
+  "Virtual / Zoom",
+  "Senate Chamber",
+  "Physics Lecture Theatre",
+  "Executive Boardroom",
+  "Faculty Lounge",
+];
+
+const DEPARTMENTS = [
+  "Computer Science",
+  "Mathematics",
+  "Physics",
+  "Engineering",
+  "Management",
+  "Economics",
+];
+
+const EVENT_TEMPLATES: Array<{
+  title: string;
+  type: EventType;
+  role: string;
+  organizer: string;
+  description: string;
+}> = [
+  {
+    title: "Machine Learning in Education Workshop",
+    type: EventType.ATTENDED,
+    role: "Participant",
+    organizer: "Dr. Rao",
+    description: "Hands-on AI workshop covering applied machine learning models.",
+  },
+  {
+    title: "Department Curriculum Review Meeting",
+    type: EventType.HOSTED,
+    role: "Chair",
+    organizer: "Academic Council",
+    description: "Semester syllabus revision and accreditation alignment.",
+  },
+  {
+    title: "National Conference on Quantum Computing",
+    type: EventType.ATTENDED,
+    role: "Keynote Listener",
+    organizer: "IEEE Student Chapter",
+    description: "Annual conference on quantum algorithms and hardware.",
+  },
+  {
+    title: "Guest Lecture on Sustainable Engineering",
+    type: EventType.HOSTED,
+    role: "Organizer",
+    organizer: "Dr. Rao",
+    description: "Invited guest lecture by Dr. Rao on green infrastructure.",
+  },
+  {
+    title: "University End-Semester Examination Duty",
+    type: EventType.BUSY,
+    role: "Invigilator",
+    organizer: "Examination Cell",
+    description: "Full-day examination supervision duty.",
+  },
+  {
+    title: "Faculty Research Ethics Seminar",
+    type: EventType.ATTENDED,
+    role: "Participant",
+    organizer: "Research Dean Office",
+    description: "Seminar on academic integrity, citations, and grant compliance.",
+  },
+  {
+    title: "Hackathon Mentorship & Judging Panel",
+    type: EventType.HOSTED,
+    role: "Panelist",
+    organizer: "Innovation Cell",
+    description: "Evaluated 25 student software prototypes.",
+  },
+  {
+    title: "NAAC Accreditation Committee Prep",
+    type: EventType.BUSY,
+    role: "Committee Member",
+    organizer: "IQAC",
+    description: "Documentation verification and department audit.",
+  },
+];
+
+async function seedFacultyAccount(params: {
+  facultyCode: string;
+  fullName: string;
+  email: string;
+  department: string;
+  passwordHash: string;
+  reset: boolean;
+}) {
+  const faculty = await prisma.faculty.upsert({
+    where: { facultyCode: params.facultyCode },
+    update: {
+      fullName: params.fullName,
+      email: params.email,
+      department: params.department,
+      passwordHash: params.passwordHash,
+    },
+    create: {
+      facultyCode: params.facultyCode,
+      fullName: params.fullName,
+      email: params.email,
+      department: params.department,
+      passwordHash: params.passwordHash,
+    },
+  });
+
+  const existingCount = await prisma.event.count({
+    where: { facultyId: faculty.id },
+  });
+
+  if (existingCount > 0 && !params.reset) {
+    console.log(
+      `Skipping event creation for ${params.facultyCode} (${existingCount} events already exist). Use --reset to recreate.`
+    );
+    return;
+  }
+
+  if (params.reset) {
+    await prisma.event.deleteMany({ where: { facultyId: faculty.id } });
+  }
+
+  const now = startOfHour(new Date());
+  const eventsToCreate = [];
+
+  for (let i = 0; i < 48; i++) {
+    const template = EVENT_TEMPLATES[i % EVENT_TEMPLATES.length];
+    const daysAgo = i * 7 + (i % 5);
+    const startAt = subDays(now, daysAgo);
+    const endAt = addHours(startAt, 2);
+
+    eventsToCreate.push({
+      facultyId: faculty.id,
+      title:
+        i === 3
+          ? "Applied AI Workshop"
+          : `${template.title} #${Math.floor(i / 8) + 1}`,
+      type: template.type,
+      startAt,
+      endAt,
+      allDay: template.type === EventType.BUSY && i % 2 === 0,
+      location: LOCATIONS[i % LOCATIONS.length],
+      department: DEPARTMENTS[i % DEPARTMENTS.length],
+      organizer: template.organizer,
+      role: template.role,
+      description: template.description,
+    });
+  }
+
+  for (let u = 1; u <= 4; u++) {
+    const template = EVENT_TEMPLATES[u % EVENT_TEMPLATES.length];
+    const startAt = addDays(now, u * 4);
+    const endAt = addHours(startAt, 2);
+
+    eventsToCreate.push({
+      facultyId: faculty.id,
+      title: `Upcoming: ${template.title}`,
+      type: template.type,
+      startAt,
+      endAt,
+      allDay: false,
+      location: LOCATIONS[u % LOCATIONS.length],
+      department: DEPARTMENTS[u % DEPARTMENTS.length],
+      organizer: template.organizer,
+      role: template.role,
+      description: template.description,
+    });
+  }
+
+  await prisma.event.createMany({ data: eventsToCreate });
+  console.log(
+    `Seeded ${eventsToCreate.length} events for ${params.facultyCode}.`
+  );
+}
+
+async function main() {
+  const seedPassword = process.env.SEED_PASSWORD || "DemoPassword123";
+  const reset = process.argv.includes("--reset");
+  const passwordHash = await hashPassword(seedPassword);
+
+  await seedFacultyAccount({
+    facultyCode: "DEMO-001",
+    fullName: "Dr. Ananya Sharma",
+    email: "ananya.sharma@university.edu",
+    department: "Computer Science",
+    passwordHash,
+    reset,
+  });
+
+  await seedFacultyAccount({
+    facultyCode: "DEMO-002",
+    fullName: "Prof. Vikram Menon",
+    email: "vikram.menon@university.edu",
+    department: "Physics",
+    passwordHash,
+    reset,
+  });
+}
+
+main()
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
+
+=== config/constants.ts ===
+export const APP_CONFIG = {
+  appName: process.env.APP_NAME || "FacultyPulse",
+  universityName: process.env.UNIVERSITY_NAME || "University",
+  timezone: process.env.APP_TIMEZONE || "Asia/Kolkata",
+  academicYearStartMonth: Number(process.env.ACADEMIC_YEAR_START_MONTH || 7),
+  sessionDays: Number(process.env.SESSION_DAYS || 7),
+  sessionCookieName: "fp_session",
+  facultyIdPattern: new RegExp(
+    process.env.FACULTY_ID_PATTERN || "^[A-Z0-9-]{4,20}$"
+  ),
+  maxReportDays: 366,
+  defaultPageSize: 20,
+  maxPageSize: 100,
+} as const;
+
+=== config/departments.ts ===
+export const SEED_DEPARTMENTS = [
+  "Computer Science",
+  "Mathematics",
+  "Physics",
+  "Chemistry",
+  "Biology",
+  "Commerce",
+  "Economics",
+  "English",
+  "Management",
+  "Engineering",
+  "Other",
+] as const;
+
+=== config/badges.ts ===
+export interface BadgeMetricInput {
+  totalHosted: number;
+  totalAttended: number;
+  distinctMonthsCount: number;
+  departmentsEngaged: number;
+  hasFullCalendarYear: boolean;
+}
+
+export interface BadgeDefinition {
+  id: string;
+  name: string;
+  ruleText: string;
+  check: (metrics: BadgeMetricInput) => boolean;
+}
+
+export const BADGE_DEFINITIONS: BadgeDefinition[] = [
+  {
+    id: "host-starter",
+    name: "Host Starter",
+    ruleText: "At least 1 hosted event",
+    check: (m) => m.totalHosted >= 1,
+  },
+  {
+    id: "host-pro",
+    name: "Host Pro",
+    ruleText: "At least 5 hosted events",
+    check: (m) => m.totalHosted >= 5,
+  },
+  {
+    id: "host-champion",
+    name: "Host Champion",
+    ruleText: "At least 15 hosted events",
+    check: (m) => m.totalHosted >= 15,
+  },
+  {
+    id: "attendee",
+    name: "Attendee",
+    ruleText: "At least 10 attended events",
+    check: (m) => m.totalAttended >= 10,
+  },
+  {
+    id: "consistent-contributor",
+    name: "Consistent Contributor",
+    ruleText: "Events in at least 6 different months",
+    check: (m) => m.distinctMonthsCount >= 6,
+  },
+  {
+    id: "cross-disciplinary",
+    name: "Cross-Disciplinary",
+    ruleText: "Events in at least 3 departments",
+    check: (m) => m.departmentsEngaged >= 3,
+  },
+  {
+    id: "full-year",
+    name: "Full Year",
+    ruleText: "Events in all 12 months of one calendar year",
+    check: (m) => m.hasFullCalendarYear,
+  },
+];
+
+=== lib/db.ts ===
+import { PrismaClient } from "@prisma/client";
+
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClient | undefined;
+};
+
+export const prisma =
+  globalForPrisma.prisma ??
+  new PrismaClient({
+    // SEC9: Never log event data queries to stdout
+    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
+  });
+
+if (process.env.NODE_ENV !== "production") {
+  globalForPrisma.prisma = prisma;
+}
+
+=== lib/time.ts ===
+import {
+  startOfDay,
+  endOfDay,
+  startOfWeek,
+  endOfWeek,
+  startOfMonth,
+  endOfMonth,
+  subMonths,
+  eachDayOfInterval,
+  format,
+} from "date-fns";
+import { toZonedTime, fromZonedTime, formatInTimeZone } from "date-fns-tz";
+import { APP_CONFIG } from "@/config/constants";
+
+export function formatInAppTz(date: Date, pattern = "dd MMM yyyy, hh:mm a"): string {
+  return formatInTimeZone(date, APP_CONFIG.timezone, pattern);
+}
+
+export function formatDateKeyInAppTz(date: Date): string {
+  return formatInTimeZone(date, APP_CONFIG.timezone, "yyyy-MM-dd");
+}
+
+export function formatMonthKeyInAppTz(date: Date): string {
+  return formatInTimeZone(date, APP_CONFIG.timezone, "yyyy-MM");
+}
+
+export function formatYearKeyInAppTz(date: Date): string {
+  return formatInTimeZone(date, APP_CONFIG.timezone, "yyyy");
+}
+
+export function getCalendarDaysBetween(startAt: Date, endAt: Date): string[] {
+  const tz = APP_CONFIG.timezone;
+  const zonedStart = startOfDay(toZonedTime(startAt, tz));
+  const zonedEnd = endOfDay(toZonedTime(endAt, tz));
+  if (zonedEnd < zonedStart) return [format(zonedStart, "yyyy-MM-dd")];
+
+  return eachDayOfInterval({ start: zonedStart, end: zonedEnd }).map((d) =>
+    format(d, "yyyy-MM-dd")
+  );
+}
+
+export function getAcademicYearRange(referenceDate: Date = new Date()): {
+  from: Date;
+  to: Date;
+} {
+  const tz = APP_CONFIG.timezone;
+  const zonedNow = toZonedTime(referenceDate, tz);
+  const startMonthIdx = APP_CONFIG.academicYearStartMonth - 1; // 0-indexed (July = 6)
+  const currentYear = zonedNow.getFullYear();
+  const currentMonth = zonedNow.getMonth();
+
+  const startYear = currentMonth >= startMonthIdx ? currentYear : currentYear - 1;
+  const startLocal = new Date(startYear, startMonthIdx, 1, 0, 0, 0, 0);
+  const endLocal = endOfMonth(new Date(startYear + 1, startMonthIdx - 1, 1));
+
+  return {
+    from: fromZonedTime(startLocal, tz),
+    to: fromZonedTime(endLocal, tz),
+  };
+}
+
+export function getCurrentSemesterRange(referenceDate: Date = new Date()): {
+  from: Date;
+  to: Date;
+} {
+  const tz = APP_CONFIG.timezone;
+  const zonedNow = toZonedTime(referenceDate, tz);
+  const startMonthIdx = APP_CONFIG.academicYearStartMonth - 1; // e.g., 6 for July
+  const secondSemMonthIdx = (startMonthIdx + 6) % 12; // e.g., 0 for Jan
+  const year = zonedNow.getFullYear();
+  const month = zonedNow.getMonth();
+
+  let semStartLocal: Date;
+  let semEndLocal: Date;
+
+  if (startMonthIdx < secondSemMonthIdx) {
+    if (month >= startMonthIdx && month < secondSemMonthIdx) {
+      semStartLocal = new Date(year, startMonthIdx, 1, 0, 0, 0, 0);
+      semEndLocal = endOfMonth(new Date(year, secondSemMonthIdx - 1, 1));
+    } else {
+      const sYear = month >= secondSemMonthIdx ? year : year - 1;
+      semStartLocal = new Date(sYear, secondSemMonthIdx, 1, 0, 0, 0, 0);
+      semEndLocal = endOfMonth(new Date(sYear + 1, startMonthIdx - 1, 1));
+    }
+  } else {
+    // e.g., July (6) to Dec (11) and Jan (0) to June (5)
+    if (month >= startMonthIdx) {
+      semStartLocal = new Date(year, startMonthIdx, 1, 0, 0, 0, 0);
+      semEndLocal = endOfMonth(new Date(year, 11, 1));
+    } else if (month < startMonthIdx && month >= secondSemMonthIdx) {
+      semStartLocal = new Date(year, secondSemMonthIdx, 1, 0, 0, 0, 0);
+      semEndLocal = endOfMonth(new Date(year, startMonthIdx - 1, 1));
+    } else {
+      semStartLocal = new Date(year - 1, startMonthIdx, 1, 0, 0, 0, 0);
+      semEndLocal = endOfMonth(new Date(year, secondSemMonthIdx - 1, 1));
+    }
+  }
+
+  return {
+    from: fromZonedTime(semStartLocal, tz),
+    to: fromZonedTime(semEndLocal, tz),
+  };
+}
+
+export function getPresetDateRange(
+  preset:
+    | "this_week"
+    | "this_month"
+    | "last_3_months"
+    | "last_6_months"
+    | "academic_year",
+  now: Date = new Date()
+): { from: Date; to: Date } {
+  const tz = APP_CONFIG.timezone;
+  const zonedNow = toZonedTime(now, tz);
+
+  switch (preset) {
+    case "this_week":
+      return {
+        from: fromZonedTime(startOfWeek(zonedNow, { weekStartsOn: 1 }), tz),
+        to: fromZonedTime(endOfWeek(zonedNow, { weekStartsOn: 1 }), tz),
+      };
+    case "this_month":
+      return {
+        from: fromZonedTime(startOfMonth(zonedNow), tz),
+        to: fromZonedTime(endOfMonth(zonedNow), tz),
+      };
+    case "last_3_months":
+      return {
+        from: fromZonedTime(startOfDay(subMonths(zonedNow, 3)), tz),
+        to: fromZonedTime(endOfDay(zonedNow), tz),
+      };
+    case "last_6_months":
+      return {
+        from: fromZonedTime(startOfDay(subMonths(zonedNow, 6)), tz),
+        to: fromZonedTime(endOfDay(zonedNow), tz),
+      };
+    case "academic_year":
+      return getAcademicYearRange(now);
+  }
+}
+
+=== lib/api-response.ts ===
+import { NextResponse } from "next/server";
+import { ZodError } from "zod";
+
+export type ErrorCode =
+  | "VALIDATION_ERROR"
+  | "UNAUTHORIZED"
+  | "NOT_FOUND"
+  | "CONFLICT"
+  | "RATE_LIMITED"
+  | "INTERNAL_ERROR";
+
+export function apiError(
+  code: ErrorCode,
+  message: string,
+  status: number,
+  fields?: Record<string, string>
+) {
+  return NextResponse.json(
+    {
+      error: {
+        code,
+        message,
+        ...(fields ? { fields } : {}),
+      },
+    },
+    { status }
+  );
+}
+
+export function handleZodError(error: ZodError) {
+  const fields: Record<string, string> = {};
+  for (const issue of error.issues) {
+    const key = issue.path.join(".") || "root";
+    if (!fields[key]) {
+      fields[key] = issue.message;
+    }
+  }
+  const firstMessage = error.issues[0]?.message || "Invalid input provided.";
+  return apiError("VALIDATION_ERROR", firstMessage, 400, fields);
+}
+
+/**
+ * SEC9: No event data written to logs. Log only request path, status, and duration.
+ */
+export function logRequest(path: string, status: number, startTimeMs: number) {
+  const durationMs = Date.now() - startTimeMs;
+  console.info(`[API] path=${path} status=${status} duration=${durationMs}ms`);
+}
+
+=== lib/auth/password.ts ===
+import bcrypt from "bcryptjs";
+
+const BCRYPT_COST = 12; // F1.5 & SEC3
+
+export async function hashPassword(plainText: string): Promise<string> {
+  return bcrypt.hash(plainText, BCRYPT_COST);
+}
+
+export async function verifyPassword(
+  plainText: string,
+  passwordHash: string
+): Promise<boolean> {
+  return bcrypt.compare(plainText, passwordHash);
+}
+
+=== lib/auth/jwt.ts ===
+import { SignJWT, jwtVerify } from "jose";
+import { APP_CONFIG } from "@/config/constants";
+
+export interface SessionPayload {
+  facultyId: string;
+  facultyCode: string;
+  email: string;
+}
+
+function getSecretKey(): Uint8Array {
+  const secret = process.env.JWT_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new Error("JWT_SECRET must be set and at least 32 characters long.");
+  }
+  return new TextEncoder().encode(secret);
+}
+
+export async function signSessionToken(payload: SessionPayload): Promise<string> {
+  return new SignJWT({ ...payload })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime(`${APP_CONFIG.sessionDays}d`)
+    .sign(getSecretKey());
+}
+
+export async function verifySessionToken(
+  token: string
+): Promise<SessionPayload | null> {
+  try {
+    const { payload } = await jwtVerify(token, getSecretKey());
+    if (
+      typeof payload.facultyId === "string" &&
+      typeof payload.facultyCode === "string" &&
+      typeof payload.email === "string"
+    ) {
+      return {
+        facultyId: payload.facultyId,
+        facultyCode: payload.facultyCode,
+        email: payload.email,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+=== lib/auth/rate-limit.ts ===
+interface RateRecord {
+  count: number;
+  windowStartMs: number;
+  blockedUntilMs?: number;
+}
+
+const loginAttempts = new Map<string, RateRecord>();
+const aiSearchAttempts = new Map<string, RateRecord>();
+
+const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
+const ONE_HOUR_MS = 60 * 60 * 1000;
+const MAX_LOGIN_ATTEMPTS = 5;
+const MAX_AI_REQUESTS_PER_HOUR = 30;
+
+/**
+ * F1.10: After 5 failed sign-in attempts for the same faculty ID within 15 minutes,
+ * block further attempts for 15 minutes.
+ */
+export function checkLoginRateLimit(facultyCode: string, nowMs = Date.now()): {
+  allowed: boolean;
+} {
+  const key = facultyCode.toUpperCase();
+  const record = loginAttempts.get(key);
+  if (!record) return { allowed: true };
+
+  if (record.blockedUntilMs && nowMs < record.blockedUntilMs) {
+    return { allowed: false };
+  }
+
+  if (nowMs - record.windowStartMs > FIFTEEN_MINUTES_MS) {
+    loginAttempts.delete(key);
+    return { allowed: true };
+  }
+
+  return { allowed: record.count < MAX_LOGIN_ATTEMPTS };
+}
+
+export function recordFailedLogin(facultyCode: string, nowMs = Date.now()): void {
+  const key = facultyCode.toUpperCase();
+  const existing = loginAttempts.get(key);
+
+  if (!existing || nowMs - existing.windowStartMs > FIFTEEN_MINUTES_MS) {
+    loginAttempts.set(key, { count: 1, windowStartMs: nowMs });
+    return;
+  }
+
+  const nextCount = existing.count + 1;
+  const blockedUntilMs =
+    nextCount >= MAX_LOGIN_ATTEMPTS ? nowMs + FIFTEEN_MINUTES_MS : undefined;
+
+  loginAttempts.set(key, {
+    count: nextCount,
+    windowStartMs: existing.windowStartMs,
+    blockedUntilMs,
+  });
+}
+
+export function clearLoginRateLimit(facultyCode: string): void {
+  loginAttempts.delete(facultyCode.toUpperCase());
+}
+
+/**
+ * SEC7: Rate limit on AI search (30 requests per user per hour).
+ */
+export function consumeAiRateLimit(facultyId: string, nowMs = Date.now()): {
+  allowed: boolean;
+} {
+  const existing = aiSearchAttempts.get(facultyId);
+  if (!existing || nowMs - existing.windowStartMs > ONE_HOUR_MS) {
+    aiSearchAttempts.set(facultyId, { count: 1, windowStartMs: nowMs });
+    return { allowed: true };
+  }
+
+  if (existing.count >= MAX_AI_REQUESTS_PER_HOUR) {
+    return { allowed: false };
+  }
+
+  existing.count += 1;
+  return { allowed: true };
+}
+
+=== lib/auth/provider.ts ===
+import { cookies } from "next/headers";
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
+import { APP_CONFIG } from "@/config/constants";
+import { hashPassword, verifyPassword } from "./password";
+import {
+  signSessionToken,
+  verifySessionToken,
+  SessionPayload,
+} from "./jwt";
+
+export interface PublicFacultyProfile {
+  id: string;
+  facultyCode: string;
+  fullName: string;
+  email: string;
+  department: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface AuthProvider {
+  signIn(
+    facultyCode: string,
+    passwordPlain: string
+  ): Promise<{ profile: PublicFacultyProfile; token: string } | null>;
+  getSession(): Promise<SessionPayload | null>;
+  signOut(response: NextResponse): void;
+}
+
+export function toPublicProfile(faculty: {
+  id: string;
+  facultyCode: string;
+  fullName: string;
+  email: string;
+  department: string;
+  createdAt: Date;
+  updatedAt: Date;
+}): PublicFacultyProfile {
+  return {
+    id: faculty.id,
+    facultyCode: faculty.facultyCode,
+    fullName: faculty.fullName,
+    email: faculty.email,
+    department: faculty.department,
+    createdAt: faculty.createdAt,
+    updatedAt: faculty.updatedAt,
+  };
+}
+
+export function setSessionCookie(response: NextResponse, token: string): void {
+  response.cookies.set(APP_CONFIG.sessionCookieName, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: APP_CONFIG.sessionDays * 24 * 60 * 60,
+  });
+}
+
+class CredentialsAuthProvider implements AuthProvider {
+  async signIn(facultyCode: string, passwordPlain: string) {
+    const normalizedCode = facultyCode.trim().toUpperCase();
+    const faculty = await prisma.faculty.findUnique({
+      where: { facultyCode: normalizedCode },
+    });
+
+    if (!faculty) {
+      await hashPassword(passwordPlain);
+      return null;
+    }
+
+    const isValid = await verifyPassword(passwordPlain, faculty.passwordHash);
+    if (!isValid) return null;
+
+    const token = await signSessionToken({
+      facultyId: faculty.id,
+      facultyCode: faculty.facultyCode,
+      email: faculty.email,
+    });
+
+    return {
+      profile: toPublicProfile(faculty),
+      token,
+    };
+  }
+
+  async getSession(): Promise<SessionPayload | null> {
+    const cookieStore = await cookies();
+    const token = cookieStore.get(APP_CONFIG.sessionCookieName)?.value;
+    if (!token) return null;
+    return verifySessionToken(token);
+  }
+
+  signOut(response: NextResponse): void {
+    response.cookies.set(APP_CONFIG.sessionCookieName, "", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: 0,
+    });
+  }
+}
+
+export const authProvider: AuthProvider = new CredentialsAuthProvider();
+
+=== lib/validation/auth.ts ===
+import { z } from "zod";
+import { APP_CONFIG } from "@/config/constants";
+
+export const passwordRule = z
+  .string()
+  .min(8, "Password must be at least 8 characters.")
+  .max(128, "Password must be 128 characters or fewer.")
+  .regex(/[A-Za-z]/, "Password must contain at least one letter.")
+  .regex(/[0-9]/, "Password must contain at least one number.");
+
+export const facultyCodeRule = z
+  .string()
+  .trim()
+  .transform((val) => val.toUpperCase())
+  .refine((val) => APP_CONFIG.facultyIdPattern.test(val), {
+    message:
+      "Faculty ID must be 4 to 20 uppercase letters, numbers, or hyphens.",
+  });
+
+export const registerSchema = z
+  .object({
+    facultyCode: facultyCodeRule,
+    fullName: z
+      .string()
+      .trim()
+      .min(2, "Full name must be at least 2 characters.")
+      .max(120, "Full name cannot exceed 120 characters."),
+    email: z
+      .string()
+      .trim()
+      .email("Please enter a valid email address.")
+      .max(150)
+      .transform((v) => v.toLowerCase()),
+    department: z
+      .string()
+      .trim()
+      .min(2, "Department is required.")
+      .max(100, "Department cannot exceed 100 characters."),
+    password: passwordRule,
+    confirmPassword: z.string().optional(),
+  })
+  .strict()
+  .refine(
+    (data) =>
+      data.confirmPassword === undefined ||
+      data.password === data.confirmPassword,
+    {
+      message: "Passwords do not match.",
+      path: ["confirmPassword"],
+    }
+  );
+
+export const loginSchema = z
+  .object({
+    facultyCode: z.string().trim().min(1, "Faculty ID is required."),
+    password: z.string().min(1, "Password is required."),
+  })
+  .strict();
+
+export const updateProfileSchema = z
+  .object({
+    fullName: z
+      .string()
+      .trim()
+      .min(2, "Full name must be at least 2 characters.")
+      .max(120, "Full name cannot exceed 120 characters.")
+      .optional(),
+    email: z
+      .string()
+      .trim()
+      .email("Please enter a valid email address.")
+      .max(150)
+      .transform((v) => v.toLowerCase())
+      .optional(),
+    department: z
+      .string()
+      .trim()
+      .min(2, "Department must be at least 2 characters.")
+      .max(100, "Department cannot exceed 100 characters.")
+      .optional(),
+  })
+  .strict();
+
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, "Current password is required."),
+    newPassword: passwordRule,
+  })
+  .strict();
+
+export const deleteAccountSchema = z
+  .object({
+    confirmFacultyCode: z.string().trim().min(1, "Confirmation is required."),
+  })
+  .strict();
+
+=== lib/validation/event.ts ===
+import { z } from "zod";
+import { EventType } from "@prisma/client";
+
+const optionalText = (max: number, label: string) =>
+  z
+    .string()
+    .trim()
+    .max(max, `${label} must be ${max} characters or fewer.`)
+    .optional()
+    .nullable()
+    .transform((v) => (v && v.length > 0 ? v : null));
+
+const baseEventFields = {
+  title: z
+    .string()
+    .trim()
+    .min(3, "Title must be at least 3 characters.")
+    .max(150, "Title must be 150 characters or fewer."),
+  type: z.nativeEnum(EventType, {
+    errorMap: () => ({ message: "Type must be ATTENDED, HOSTED, or BUSY." }),
+  }),
+  startAt: z.coerce.date({
+    errorMap: () => ({ message: "Valid start date and time required." }),
+  }),
+  endAt: z.coerce.date({
+    errorMap: () => ({ message: "Valid end date and time required." }),
+  }),
+  allDay: z.boolean().default(false),
+  location: optionalText(200, "Location"),
+  department: optionalText(100, "Department"),
+  organizer: optionalText(150, "Organizer"),
+  role: optionalText(100, "Role"),
+  description: optionalText(2000, "Description"),
+  attachmentUrl: optionalText(500, "Attachment URL"),
+};
+
+export const createEventSchema = z
+  .object(baseEventFields)
+  .strict()
+  .refine((data) => data.endAt >= data.startAt, {
+    message: "End time must be after or equal to start time.",
+    path: ["endAt"],
+  });
+
+export const updateEventSchema = z
+  .object(baseEventFields)
+  .partial()
+  .strict()
+  .refine(
+    (data) => {
+      if (data.startAt && data.endAt) {
+        return data.endAt >= data.startAt;
+      }
+      return true;
+    },
+    {
+      message: "End time must be after or equal to start time.",
+      path: ["endAt"],
+    }
+  );
+
+export const duplicateEventSchema = z
+  .object({
+    startAt: z.coerce.date().optional(),
+  })
+  .strict();
+
+export const listEventsQuerySchema = z
+  .object({
+    preset: z
+      .enum([
+        "this_week",
+        "this_month",
+        "last_3_months",
+        "last_6_months",
+        "academic_year",
+      ])
+      .optional(),
+    from: z.coerce.date().optional(),
+    to: z.coerce.date().optional(),
+    type: z.string().optional(),
+    department: z.string().trim().max(100).optional(),
+    q: z.string().trim().max(200).optional(),
+    page: z.coerce.number().int().min(1).default(1),
+    pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  })
+  .strict();
+
+=== lib/validation/report.ts ===
+import { z } from "zod";
+import { differenceInCalendarDays } from "date-fns";
+import { APP_CONFIG } from "@/config/constants";
+
+export const reportQuerySchema = z
+  .object({
+    from: z.coerce.date({
+      errorMap: () => ({ message: "Start date (from) is required." }),
+    }),
+    to: z.coerce.date({
+      errorMap: () => ({ message: "End date (to) is required." }),
+    }),
+    type: z.string().optional(),
+    department: z.string().trim().max(100).optional(),
+    title: z
+      .string()
+      .trim()
+      .max(150)
+      .default("Semester Activity Report"),
+    format: z.enum(["csv", "xlsx"]).optional(),
+  })
+  .strict()
+  .refine((d) => d.to >= d.from, {
+    message: "End date must be on or after start date.",
+    path: ["to"],
+  })
+  .refine(
+    (d) => differenceInCalendarDays(d.to, d.from) <= APP_CONFIG.maxReportDays,
+    {
+      message: "Report date range cannot exceed 366 days.",
+      path: ["to"],
+    }
+  );
+
+=== lib/validation/ai.ts ===
+import { z } from "zod";
+import { EventType } from "@prisma/client";
+
+export const aiSearchRequestSchema = z
+  .object({
+    message: z
+      .string()
+      .trim()
+      .min(1, "Please enter a search message.")
+      .max(300, "Search message must be 300 characters or fewer."),
+  })
+  .strict();
+
+export const parsedFilterSchema = z
+  .object({
+    type: z.nativeEnum(EventType).optional(),
+    from: z.coerce.date().optional(),
+    to: z.coerce.date().optional(),
+    keywords: z.array(z.string()).default([]),
+    location: z.string().optional(),
+    organizer: z.string().optional(),
+    dateLabel: z.string().optional(),
+  })
+  .strict();
+
+export type StructuredAiFilter = z.infer<typeof parsedFilterSchema>;
+
+=== lib/events/overlap.ts ===
+import { prisma } from "@/lib/db";
+
+export interface OverlappingEventSummary {
+  id: string;
+  title: string;
+  startAt: Date;
+  endAt: Date;
+}
+
+/**
+ * F2.8 & Section 15.1: Returns true for partial and full overlap, false for adjacent events.
+ */
+export function intervalsOverlap(
+  startA: Date,
+  endA: Date,
+  startB: Date,
+  endB: Date
+): boolean {
+  if (startA.getTime() === endA.getTime() && startB.getTime() === endB.getTime()) {
+    return startA.getTime() === startB.getTime();
+  }
+  return startA < endB && endA > startB;
+}
+
+export async function findOverlappingEvents(params: {
+  facultyId: string;
+  startAt: Date;
+  endAt: Date;
+  excludeId?: string;
+}): Promise<OverlappingEventSummary[]> {
+  const { facultyId, startAt, endAt, excludeId } = params;
+
+  const candidates = await prisma.event.findMany({
+    where: {
+      facultyId, // SEC1: Mandatory scoping
+      ...(excludeId ? { id: { not: excludeId } } : {}),
+      startAt: { lt: endAt },
+      endAt: { gt: startAt },
+    },
+    select: {
+      id: true,
+      title: true,
+      startAt: true,
+      endAt: true,
+    },
+    orderBy: { startAt: "asc" },
+  });
+
+  return candidates.filter((c) =>
+    intervalsOverlap(startAt, endAt, c.startAt, c.endAt)
+  );
+}
+
+=== lib/events/queries.ts ===
+import { EventType, Prisma } from "@prisma/client";
+import { addDays, endOfDay, startOfDay } from "date-fns";
+import { toZonedTime, fromZonedTime } from "date-fns-tz";
+import { prisma } from "@/lib/db";
+import { APP_CONFIG } from "@/config/constants";
+import { SEED_DEPARTMENTS } from "@/config/departments";
+import { getPresetDateRange } from "@/lib/time";
+
+export interface EventListFilters {
+  preset?:
+    | "this_week"
+    | "this_month"
+    | "last_3_months"
+    | "last_6_months"
+    | "academic_year";
+  from?: Date;
+  to?: Date;
+  type?: string;
+  department?: string;
+  q?: string;
+  page: number;
+  pageSize: number;
+}
+
+export function parseEventTypesParam(typeParam?: string): EventType[] {
+  if (!typeParam) return [];
+  const valid = new Set<string>(Object.values(EventType));
+  return typeParam
+    .split(",")
+    .map((s) => s.trim().toUpperCase())
+    .filter((s): s is EventType => valid.has(s));
+}
+
+export function normalizeAllDayDates(
+  startAt: Date,
+  endAt: Date,
+  allDay: boolean
+): { startAt: Date; endAt: Date } {
+  if (!allDay) return { startAt, endAt };
+  const tz = APP_CONFIG.timezone;
+  const zonedStart = startOfDay(toZonedTime(startAt, tz));
+  const zonedEnd = endOfDay(toZonedTime(endAt, tz));
+  return {
+    startAt: fromZonedTime(zonedStart, tz),
+    endAt: fromZonedTime(zonedEnd, tz),
+  };
+}
+
+export function buildEventWhereClause(
+  facultyId: string,
+  filters: Omit<EventListFilters, "page" | "pageSize">
+): Prisma.EventWhereInput {
+  // SEC1: Every query includes facultyId in the where clause
+  const where: Prisma.EventWhereInput = { facultyId };
+
+  let rangeFrom = filters.from;
+  let rangeTo = filters.to;
+
+  if (filters.preset && !rangeFrom && !rangeTo) {
+    const presetRange = getPresetDateRange(filters.preset);
+    rangeFrom = presetRange.from;
+    rangeTo = presetRange.to;
+  }
+
+  if (rangeFrom || rangeTo) {
+    where.startAt = {
+      ...(rangeFrom ? { gte: rangeFrom } : {}),
+      ...(rangeTo ? { lte: rangeTo } : {}),
+    };
+  }
+
+  const parsedTypes = parseEventTypesParam(filters.type);
+  if (parsedTypes.length === 1) {
+    where.type = parsedTypes[0];
+  } else if (parsedTypes.length > 1) {
+    where.type = { in: parsedTypes };
+  }
+
+  if (filters.department) {
+    where.department = {
+      equals: filters.department,
+      mode: "insensitive",
+    };
+  }
+
+  if (filters.q) {
+    const q = filters.q;
+    where.OR = [
+      { title: { contains: q, mode: "insensitive" } },
+      { location: { contains: q, mode: "insensitive" } },
+      { organizer: { contains: q, mode: "insensitive" } },
+      { description: { contains: q, mode: "insensitive" } },
+    ];
+  }
+
+  return where;
+}
+
+export async function listFacultyEvents(
+  facultyId: string,
+  filters: EventListFilters
+) {
+  const where = buildEventWhereClause(facultyId, filters);
+  const skip = (filters.page - 1) * filters.pageSize;
+
+  const [items, total] = await Promise.all([
+    prisma.event.findMany({
+      where,
+      orderBy: { startAt: "desc" },
+      skip,
+      take: filters.pageSize,
+    }),
+    prisma.event.count({ where }),
+  ]);
+
+  return {
+    items,
+    total,
+    page: filters.page,
+    pageSize: filters.pageSize,
+  };
+}
+
+export async function getFacultyEventById(facultyId: string, eventId: string) {
+  // SEC1 & SEC2: Filtered by both id and facultyId; caller returns 404 if null
+  return prisma.event.findFirst({
+    where: {
+      id: eventId,
+      facultyId,
+    },
+  });
+}
+
+export async function createFacultyEvent(
+  facultyId: string,
+  input: {
+    title: string;
+    type: EventType;
+    startAt: Date;
+    endAt: Date;
+    allDay: boolean;
+    location?: string | null;
+    department?: string | null;
+    organizer?: string | null;
+    role?: string | null;
+    description?: string | null;
+    attachmentUrl?: string | null;
+  }
+) {
+  const { startAt, endAt } = normalizeAllDayDates(
+    input.startAt,
+    input.endAt,
+    input.allDay
+  );
+
+  return prisma.event.create({
+    data: {
+      facultyId,
+      title: input.title,
+      type: input.type,
+      startAt,
+      endAt,
+      allDay: input.allDay,
+      location: input.location ?? null,
+      department: input.department ?? null,
+      organizer: input.organizer ?? null,
+      role: input.role ?? null,
+      description: input.description ?? null,
+      attachmentUrl: input.attachmentUrl ?? null,
+    },
+  });
+}
+
+export async function updateFacultyEvent(
+  facultyId: string,
+  eventId: string,
+  patch: Partial<{
+    title: string;
+    type: EventType;
+    startAt: Date;
+    endAt: Date;
+    allDay: boolean;
+    location: string | null;
+    department: string | null;
+    organizer: string | null;
+    role: string | null;
+    description: string | null;
+    attachmentUrl: string | null;
+  }>
+) {
+  const existing = await getFacultyEventById(facultyId, eventId);
+  if (!existing) return null;
+
+  const nextAllDay = patch.allDay ?? existing.allDay;
+  const rawStart = patch.startAt ?? existing.startAt;
+  const rawEnd = patch.endAt ?? existing.endAt;
+
+  if (rawEnd < rawStart) {
+    throw new Error("INVALID_DATE_ORDER");
+  }
+
+  const { startAt, endAt } = normalizeAllDayDates(rawStart, rawEnd, nextAllDay);
+
+  return prisma.event.update({
+    where: { id: existing.id },
+    data: {
+      ...patch,
+      startAt,
+      endAt,
+      allDay: nextAllDay,
+    },
+  });
+}
+
+export async function deleteFacultyEvent(
+  facultyId: string,
+  eventId: string
+): Promise<boolean> {
+  const result = await prisma.event.deleteMany({
+    where: {
+      id: eventId,
+      facultyId, // SEC1
+    },
+  });
+  return result.count > 0;
+}
+
+export async function duplicateFacultyEvent(
+  facultyId: string,
+  eventId: string,
+  newStartAt?: Date
+) {
+  const source = await getFacultyEventById(facultyId, eventId);
+  if (!source) return null;
+
+  const durationMs = source.endAt.getTime() - source.startAt.getTime();
+  const targetStart = newStartAt ?? addDays(source.startAt, 7); // F2.7: Default +7 days
+  const targetEnd = new Date(targetStart.getTime() + durationMs);
+
+  return prisma.event.create({
+    data: {
+      facultyId,
+      title: source.title,
+      type: source.type,
+      startAt: targetStart,
+      endAt: targetEnd,
+      allDay: source.allDay,
+      location: source.location,
+      department: source.department,
+      organizer: source.organizer,
+      role: source.role,
+      description: source.description,
+      attachmentUrl: source.attachmentUrl,
+    },
+  });
+}
+
+export async function getFacultyDepartmentsList(
+  facultyId: string
+): Promise<string[]> {
+  const usedRows = await prisma.event.findMany({
+    where: {
+      facultyId,
+      department: { not: null },
+    },
+    select: { department: true },
+    distinct: ["department"],
+  });
+
+  const merged = new Set<string>(SEED_DEPARTMENTS);
+  for (const row of usedRows) {
+    if (row.department?.trim()) {
+      merged.add(row.department.trim());
+    }
+  }
+  return Array.from(merged).sort((a, b) => a.localeCompare(b));
+}
+
+=== lib/achievements/badges.ts ===
+import { BADGE_DEFINITIONS, BadgeMetricInput } from "@/config/badges";
+
+export interface EvaluatedBadge {
+  id: string;
+  name: string;
+  ruleText: string;
+  earned: boolean;
+}
+
+export function evaluateBadges(metrics: BadgeMetricInput): {
+  badges: EvaluatedBadge[];
+  topBadge: EvaluatedBadge | null;
+} {
+  const evaluated = BADGE_DEFINITIONS.map((def) => ({
+    id: def.id,
+    name: def.name,
+    ruleText: def.ruleText,
+    earned: def.check(metrics),
+  }));
+
+  const earnedList = evaluated.filter((b) => b.earned);
+  const topBadge =
+    earnedList.length > 0 ? earnedList[earnedList.length - 1] : null;
+
+  return { badges: evaluated, topBadge };
+}
+
+=== lib/achievements/metrics.ts ===
+import { Event, EventType } from "@prisma/client";
+import { subMonths, startOfMonth, format } from "date-fns";
+import { toZonedTime } from "date-fns-tz";
+import { APP_CONFIG } from "@/config/constants";
+import {
+  formatMonthKeyInAppTz,
+  formatYearKeyInAppTz,
+  getCalendarDaysBetween,
+} from "@/lib/time";
+import { evaluateBadges, EvaluatedBadge } from "./badges";
+
+export interface AchievementsResult {
+  metrics: {
+    totalHosted: number;
+    totalAttended: number;
+    totalBusyDays: number;
+    totalEvents: number;
+    busiestMonth: { month: string; count: number } | null;
+    activeMonthsStreak: number;
+    departmentsEngaged: number;
+  };
+  eventsPerYear: Array<{ year: string; count: number }>;
+  eventsPerMonthLast12: Array<{
+    month: string;
+    label: string;
+    ATTENDED: number;
+    HOSTED: number;
+    BUSY: number;
+    total: number;
+  }>;
+  typeBreakdown: Array<{ type: EventType; count: number }>;
+  badges: EvaluatedBadge[];
+  topBadge: EvaluatedBadge | null;
+}
+
+function computeLongestMonthStreak(sortedMonthKeys: string[]): number {
+  if (sortedMonthKeys.length === 0) return 0;
+  let maxStreak = 1;
+  let currentStreak = 1;
+
+  for (let i = 1; i < sortedMonthKeys.length; i++) {
+    const [prevY, prevM] = sortedMonthKeys[i - 1].split("-").map(Number);
+    const [currY, currM] = sortedMonthKeys[i].split("-").map(Number);
+
+    const prevTotalMonths = prevY * 12 + prevM;
+    const currTotalMonths = currY * 12 + currM;
+
+    if (currTotalMonths === prevTotalMonths + 1) {
+      currentStreak += 1;
+      if (currentStreak > maxStreak) maxStreak = currentStreak;
+    } else if (currTotalMonths > prevTotalMonths + 1) {
+      currentStreak = 1;
+    }
+  }
+
+  return maxStreak;
+}
+
+export function calculateAchievementsFromEvents(
+  events: Array<
+    Pick<Event, "type" | "startAt" | "endAt" | "department">
+  >,
+  referenceNow: Date = new Date()
+): AchievementsResult {
+  let totalHosted = 0;
+  let totalAttended = 0;
+  let totalBusyEvents = 0;
+
+  const busyDaySet = new Set<string>();
+  const departmentsSet = new Set<string>();
+  const yearCounts = new Map<string, number>();
+  const monthCounts = new Map<string, number>();
+  const monthsByYear = new Map<string, Set<string>>();
+
+  for (const ev of events) {
+    if (ev.type === EventType.HOSTED) totalHosted += 1;
+    if (ev.type === EventType.ATTENDED) totalAttended += 1;
+    if (ev.type === EventType.BUSY) {
+      totalBusyEvents += 1;
+      for (const dayStr of getCalendarDaysBetween(ev.startAt, ev.endAt)) {
+        busyDaySet.add(dayStr);
+      }
+    }
+
+    if (ev.department?.trim()) {
+      departmentsSet.add(ev.department.trim().toLowerCase());
+    }
+
+    const yearKey = formatYearKeyInAppTz(ev.startAt);
+    const monthKey = formatMonthKeyInAppTz(ev.startAt);
+
+    yearCounts.set(yearKey, (yearCounts.get(yearKey) ?? 0) + 1);
+    monthCounts.set(monthKey, (monthCounts.get(monthKey) ?? 0) + 1);
+
+    if (!monthsByYear.has(yearKey)) {
+      monthsByYear.set(yearKey, new Set());
+    }
+    monthsByYear.get(yearKey)!.add(monthKey);
+  }
+
+  let busiestMonth: { month: string; count: number } | null = null;
+  for (const [month, count] of monthCounts.entries()) {
+    if (
+      !busiestMonth ||
+      count > busiestMonth.count ||
+      (count === busiestMonth.count && month > busiestMonth.month)
+    ) {
+      busiestMonth = { month, count };
+    }
+  }
+
+  const sortedDistinctMonths = Array.from(monthCounts.keys()).sort();
+  const activeMonthsStreak = computeLongestMonthStreak(sortedDistinctMonths);
+
+  let hasFullCalendarYear = false;
+  for (const monthSet of monthsByYear.values()) {
+    if (monthSet.size === 12) {
+      hasFullCalendarYear = true;
+      break;
+    }
+  }
+
+  const zonedNow = toZonedTime(referenceNow, APP_CONFIG.timezone);
+  const eventsPerMonthLast12: AchievementsResult["eventsPerMonthLast12"] = [];
+  const last12Map = new Map<
+    string,
+    {
+      month: string;
+      label: string;
+      ATTENDED: number;
+      HOSTED: number;
+      BUSY: number;
+      total: number;
+    }
+  >();
+
+  for (let i = 11; i >= 0; i--) {
+    const mDate = startOfMonth(subMonths(zonedNow, i));
+    const key = format(mDate, "yyyy-MM");
+    const label = format(mDate, "MMM yyyy");
+    const entry = { month: key, label, ATTENDED: 0, HOSTED: 0, BUSY: 0, total: 0 };
+    eventsPerMonthLast12.push(entry);
+    last12Map.set(key, entry);
+  }
+
+  for (const ev of events) {
+    const mKey = formatMonthKeyInAppTz(ev.startAt);
+    const bucket = last12Map.get(mKey);
+    if (bucket) {
+      bucket[ev.type] += 1;
+      bucket.total += 1;
+    }
+  }
+
+  const eventsPerYear = Array.from(yearCounts.entries())
+    .map(([year, count]) => ({ year, count }))
+    .sort((a, b) => a.year.localeCompare(b.year));
+
+  const { badges, topBadge } = evaluateBadges({
+    totalHosted,
+    totalAttended,
+    distinctMonthsCount: sortedDistinctMonths.length,
+    departmentsEngaged: departmentsSet.size,
+    hasFullCalendarYear,
+  });
+
+  return {
+    metrics: {
+      totalHosted,
+      totalAttended,
+      totalBusyDays: busyDaySet.size,
+      totalEvents: events.length,
+      busiestMonth,
+      activeMonthsStreak,
+      departmentsEngaged: departmentsSet.size,
+    },
+    eventsPerYear,
+    eventsPerMonthLast12,
+    typeBreakdown: [
+      { type: EventType.ATTENDED, count: totalAttended },
+      { type: EventType.HOSTED, count: totalHosted },
+      { type: EventType.BUSY, count: totalBusyEvents },
+    ],
+    badges,
+    topBadge,
+  };
+}
+
+=== lib/reports/build.ts ===
+import { EventType } from "@prisma/client";
+import { prisma } from "@/lib/db";
+import { buildEventWhereClause } from "@/lib/events/queries";
+import { formatInAppTz, getCalendarDaysBetween } from "@/lib/time";
+
+export interface ReportPayload {
+  header: {
+    title: string;
+    facultyName: string;
+    facultyCode: string;
+    department: string;
+    from: string;
+    to: string;
+    generatedDate: string;
+  };
+  summary: {
+    totalHosted: number;
+    totalAttended: number;
+    totalBusyDays: number;
+    totalEvents: number;
+    departmentsInvolved: string[];
+  };
+  events: Array<{
+    id: string;
+    dateFormatted: string;
+    startAt: string;
+    endAt: string;
+    title: string;
+    type: EventType;
+    role: string;
+    organizer: string;
+    location: string;
+    department: string;
+  }>;
+  footer: string;
+}
+
+export async function buildFacultyReport(params: {
+  facultyId: string;
+  from: Date;
+  to: Date;
+  type?: string;
+  department?: string;
+  title?: string;
+}): Promise<ReportPayload> {
+  const faculty = await prisma.faculty.findUniqueOrThrow({
+    where: { id: params.facultyId },
+  });
+
+  // SEC1 & SEC11: Strictly scoped to params.facultyId
+  const where = buildEventWhereClause(params.facultyId, {
+    from: params.from,
+    to: params.to,
+    type: params.type,
+    department: params.department,
+  });
+
+  const rawEvents = await prisma.event.findMany({
+    where,
+    orderBy: { startAt: "asc" },
+  });
+
+  let totalHosted = 0;
+  let totalAttended = 0;
+  const busyDays = new Set<string>();
+  const deptSet = new Set<string>();
+
+  const rows = rawEvents.map((ev) => {
+    if (ev.type === EventType.HOSTED) totalHosted += 1;
+    if (ev.type === EventType.ATTENDED) totalAttended += 1;
+    if (ev.type === EventType.BUSY) {
+      for (const d of getCalendarDaysBetween(ev.startAt, ev.endAt)) {
+        busyDays.add(d);
+      }
+    }
+    if (ev.department?.trim()) {
+      deptSet.add(ev.department.trim());
+    }
+
+    return {
+      id: ev.id,
+      dateFormatted: formatInAppTz(
+        ev.startAt,
+        ev.allDay ? "dd MMM yyyy (All day)" : "dd MMM yyyy, hh:mm a"
+      ),
+      startAt: ev.startAt.toISOString(),
+      endAt: ev.endAt.toISOString(),
+      title: ev.title,
+      type: ev.type,
+      role: ev.role ?? "-",
+      organizer: ev.organizer ?? "-",
+      location: ev.location ?? "-",
+      department: ev.department ?? "-",
+    };
+  });
+
+  const generatedDate = formatInAppTz(new Date(), "dd MMM yyyy");
+
+  return {
+    header: {
+      title: params.title || "Semester Activity Report",
+      facultyName: faculty.fullName,
+      facultyCode: faculty.facultyCode,
+      department: faculty.department,
+      from: formatInAppTz(params.from, "yyyy-MM-dd"),
+      to: formatInAppTz(params.to, "yyyy-MM-dd"),
+      generatedDate,
+    },
+    summary: {
+      totalHosted,
+      totalAttended,
+      totalBusyDays: busyDays.size,
+      totalEvents: rows.length,
+      departmentsInvolved: Array.from(deptSet).sort(),
+    },
+    events: rows,
+    footer: `Generated by FacultyPulse on ${generatedDate}. Records are self-reported by the faculty member.`,
+  };
+}
+
+=== lib/reports/csv.ts ===
+import { ReportPayload } from "./build";
+
+function escapeCsvCell(value: string | number): string {
+  const str = String(value ?? "");
+  const sanitized = /^[=+\-@]/.test(str) ? `'${str}` : str;
+  if (/[",\r\n]/.test(sanitized)) {
+    return `"${sanitized.replace(/"/g, '""')}"`;
+  }
+  return sanitized;
+}
+
+/**
+ * F5.4: UTF-8 with BOM so Excel opens it correctly.
+ */
+export function generateReportCsv(report: ReportPayload): string {
+  const BOM = "\uFEFF";
+  const lines: string[] = [];
+
+  lines.push(
+    ["Report Title", report.header.title].map(escapeCsvCell).join(","),
+    ["Faculty Name", report.header.facultyName].map(escapeCsvCell).join(","),
+    ["Faculty ID", report.header.facultyCode].map(escapeCsvCell).join(","),
+    ["Department", report.header.department].map(escapeCsvCell).join(","),
+    ["Period", `${report.header.from} to ${report.header.to}`]
+      .map(escapeCsvCell)
+      .join(","),
+    ["Generated On", report.header.generatedDate].map(escapeCsvCell).join(","),
+    "",
+    ["Total Events", report.summary.totalEvents].map(escapeCsvCell).join(","),
+    ["Total Hosted", report.summary.totalHosted].map(escapeCsvCell).join(","),
+    ["Total Attended", report.summary.totalAttended]
+      .map(escapeCsvCell)
+      .join(","),
+    ["Total Busy Days", report.summary.totalBusyDays]
+      .map(escapeCsvCell)
+      .join(","),
+    [
+      "Departments Involved",
+      report.summary.departmentsInvolved.join("; ") || "None",
+    ]
+      .map(escapeCsvCell)
+      .join(","),
+    "",
+    [
+      "Date",
+      "Title",
+      "Type",
+      "Role",
+      "Organizer",
+      "Location",
+      "Department",
+    ]
+      .map(escapeCsvCell)
+      .join(",")
+  );
+
+  for (const ev of report.events) {
+    lines.push(
+      [
+        ev.dateFormatted,
+        ev.title,
+        ev.type,
+        ev.role,
+        ev.organizer,
+        ev.location,
+        ev.department,
+      ]
+        .map(escapeCsvCell)
+        .join(",")
+    );
+  }
+
+  lines.push("", escapeCsvCell(report.footer));
+  return BOM + lines.join("\r\n");
+}
+
+=== lib/reports/xlsx.ts ===
+import * as XLSX from "xlsx";
+import { ReportPayload } from "./build";
+
+/**
+ * F5.5: Two sheets: "Summary" and "Events". Columns auto-sized, header row bold and frozen.
+ */
+export function generateReportXlsx(report: ReportPayload): Buffer {
+  const wb = XLSX.utils.book_new();
+
+  const summaryRows = [
+    ["Metric", "Value"],
+    ["Report Title", report.header.title],
+    ["Faculty Name", report.header.facultyName],
+    ["Faculty ID", report.header.facultyCode],
+    ["Department", report.header.department],
+    ["Period From", report.header.from],
+    ["Period To", report.header.to],
+    ["Generated Date", report.header.generatedDate],
+    ["Total Events", report.summary.totalEvents],
+    ["Total Hosted", report.summary.totalHosted],
+    ["Total Attended", report.summary.totalAttended],
+    ["Total Busy Days", report.summary.totalBusyDays],
+    [
+      "Departments Involved",
+      report.summary.departmentsInvolved.join(", ") || "None",
+    ],
+    ["Disclaimer", report.footer],
+  ];
+
+  const wsSummary = XLSX.utils.aoa_to_sheet(summaryRows);
+  wsSummary["!cols"] = [{ wch: 24 }, { wch: 55 }];
+  wsSummary["!freeze"] = { xSplit: 0, ySplit: 1 };
+
+  const eventsHeader = [
+    "Date",
+    "Title",
+    "Type",
+    "Role",
+    "Organizer",
+    "Location",
+    "Department",
+  ];
+
+  const eventsData = report.events.map((ev) => [
+    ev.dateFormatted,
+    ev.title,
+    ev.type,
+    ev.role,
+    ev.organizer,
+    ev.location,
+    ev.department,
+  ]);
+
+  const allEventRows = [eventsHeader, ...eventsData];
+  const wsEvents = XLSX.utils.aoa_to_sheet(allEventRows);
+
+  wsEvents["!cols"] = eventsHeader.map((header, colIdx) => {
+    let maxLen = header.length;
+    for (const row of eventsData) {
+      const cellStr = String(row[colIdx] ?? "");
+      if (cellStr.length > maxLen) maxLen = cellStr.length;
+    }
+    return { wch: Math.min(Math.max(maxLen + 3, 12), 45) };
+  });
+
+  wsEvents["!freeze"] = { xSplit: 0, ySplit: 1 };
+
+  XLSX.utils.book_append_sheet(wb, wsSummary, "Summary");
+  XLSX.utils.book_append_sheet(wb, wsEvents, "Events");
+
+  return XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+}
+
+=== lib/ai/normalize.ts ===
+/**
+ * Pipeline Step 1: Lowercase, trim, collapse spaces, remove punctuation
+ * except hyphens and dots in names.
+ */
+export function normalizeQuery(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/[^\w\s.-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+=== lib/ai/detect-type.ts ===
+import { EventType } from "@prisma/client";
+
+const TYPE_PATTERNS: Array<{ type: EventType; phrases: string[] }> = [
+  {
+    type: EventType.HOSTED,
+    phrases: ["hosted", "host", "organized", "conducted", "chaired"],
+  },
+  {
+    type: EventType.ATTENDED,
+    phrases: ["attended", "went to", "joined", "participated"],
+  },
+  {
+    type: EventType.BUSY,
+    phrases: ["busy days", "busy day", "busy", "occupied", "meetings"],
+  },
+];
+
+/**
+ * Pipeline Step 2: Detect event type and return matched phrases so they can be
+ * stripped from keyword extraction.
+ */
+export function detectEventType(normalized: string): {
+  type?: EventType;
+  matchedPhrases: string[];
+} {
+  for (const group of TYPE_PATTERNS) {
+    for (const phrase of group.phrases) {
+      const regex = new RegExp(`\\b${phrase.replace(/\s+/g, "\\s+")}\\b`, "i");
+      if (regex.test(normalized)) {
+        return { type: group.type, matchedPhrases: [phrase] };
+      }
+    }
+  }
+  return { matchedPhrases: [] };
+}
+
+=== lib/ai/extract-date.ts ===
+import {
+  startOfDay,
+  endOfDay,
+  subDays,
+  startOfWeek,
+  endOfWeek,
+  subWeeks,
+  startOfMonth,
+  endOfMonth,
+  subMonths,
+  startOfYear,
+  endOfYear,
+  subYears,
+} from "date-fns";
+import { toZonedTime, fromZonedTime } from "date-fns-tz";
+import { APP_CONFIG } from "@/config/constants";
+import { getCurrentSemesterRange } from "@/lib/time";
+
+const MONTH_MAP: Record<string, number> = {
+  january: 0,
+  jan: 0,
+  february: 1,
+  feb: 1,
+  march: 2,
+  mar: 2,
+  april: 3,
+  apr: 3,
+  may: 4,
+  june: 5,
+  jun: 5,
+  july: 6,
+  jul: 6,
+  august: 7,
+  aug: 7,
+  september: 8,
+  sep: 8,
+  sept: 8,
+  october: 9,
+  oct: 9,
+  november: 10,
+  nov: 10,
+  december: 11,
+  dec: 11,
+};
+
+export interface ExtractedDateResult {
+  from?: Date;
+  to?: Date;
+  label?: string;
+  matchedPhrases: string[];
+}
+
+/**
+ * Pipeline Step 3: Extract date range (Absolute, Relative, Seasons, Semester).
+ */
+export function extractDateRange(
+  normalized: string,
+  referenceNow: Date = new Date()
+): ExtractedDateResult {
+  const tz = APP_CONFIG.timezone;
+  const zonedNow = toZonedTime(referenceNow, tz);
+  const currentYear = zonedNow.getFullYear();
+  const currentMonth = zonedNow.getMonth();
+
+  const toUtcRange = (startLocal: Date, endLocal: Date) => ({
+    from: fromZonedTime(startOfDay(startLocal), tz),
+    to: fromZonedTime(endOfDay(endLocal), tz),
+  });
+
+  if (/\btoday\b/.test(normalized)) {
+    return {
+      ...toUtcRange(zonedNow, zonedNow),
+      label: "today",
+      matchedPhrases: ["today"],
+    };
+  }
+
+  if (/\byesterday\b/.test(normalized)) {
+    const yest = subDays(zonedNow, 1);
+    return {
+      ...toUtcRange(yest, yest),
+      label: "yesterday",
+      matchedPhrases: ["yesterday"],
+    };
+  }
+
+  if (/\bthis week\b/.test(normalized)) {
+    return {
+      ...toUtcRange(
+        startOfWeek(zonedNow, { weekStartsOn: 1 }),
+        endOfWeek(zonedNow, { weekStartsOn: 1 })
+      ),
+      label: "this week",
+      matchedPhrases: ["this week"],
+    };
+  }
+
+  if (/\blast week\b/.test(normalized)) {
+    const lw = subWeeks(zonedNow, 1);
+    return {
+      ...toUtcRange(
+        startOfWeek(lw, { weekStartsOn: 1 }),
+        endOfWeek(lw, { weekStartsOn: 1 })
+      ),
+      label: "last week",
+      matchedPhrases: ["last week"],
+    };
+  }
+
+  const lastNMonthsMatch = normalized.match(/\blast\s+(\d+)\s+months?\b/);
+  if (lastNMonthsMatch) {
+    const n = Number(lastNMonthsMatch[1]);
+    return {
+      ...toUtcRange(subMonths(zonedNow, n), zonedNow),
+      label: lastNMonthsMatch[0],
+      matchedPhrases: [lastNMonthsMatch[0]],
+    };
+  }
+
+  if (/\bthis month\b/.test(normalized)) {
+    return {
+      ...toUtcRange(startOfMonth(zonedNow), endOfMonth(zonedNow)),
+      label: "this month",
+      matchedPhrases: ["this month"],
+    };
+  }
+
+  if (/\blast month\b/.test(normalized)) {
+    const lm = subMonths(zonedNow, 1);
+    return {
+      ...toUtcRange(startOfMonth(lm), endOfMonth(lm)),
+      label: "last month",
+      matchedPhrases: ["last month"],
+    };
+  }
+
+  if (/\bthis year\b/.test(normalized)) {
+    return {
+      ...toUtcRange(startOfYear(zonedNow), endOfYear(zonedNow)),
+      label: "this year",
+      matchedPhrases: ["this year"],
+    };
+  }
+
+  if (/\blast year\b/.test(normalized)) {
+    const ly = subYears(zonedNow, 1);
+    return {
+      ...toUtcRange(startOfYear(ly), endOfYear(ly)),
+      label: "last year",
+      matchedPhrases: ["last year"],
+    };
+  }
+
+  if (/\bthis semester\b/.test(normalized)) {
+    const sem = getCurrentSemesterRange(referenceNow);
+    return {
+      from: sem.from,
+      to: sem.to,
+      label: "this semester",
+      matchedPhrases: ["this semester"],
+    };
+  }
+
+  if (/\blast semester\b/.test(normalized)) {
+    const currentSem = getCurrentSemesterRange(referenceNow);
+    const prevRef = subDays(currentSem.from, 10);
+    const prevSem = getCurrentSemesterRange(prevRef);
+    return {
+      from: prevSem.from,
+      to: prevSem.to,
+      label: "last semester",
+      matchedPhrases: ["last semester"],
+    };
+  }
+
+  const seasonMatch = normalized.match(
+    /\b(?:(last|this)\s+)?(spring|summer|autumn|fall|winter)(?:\s+(20\d{2}))?\b/
+  );
+  if (seasonMatch) {
+    const modifier = seasonMatch[1];
+    const season = seasonMatch[2];
+    const explicitYear = seasonMatch[3] ? Number(seasonMatch[3]) : undefined;
+
+    const seasonMonths: Record<string, [number, number]> = {
+      spring: [2, 4],
+      summer: [5, 7],
+      autumn: [8, 10],
+      fall: [8, 10],
+      winter: [11, 1],
+    };
+
+    const [startM, endM] = seasonMonths[season];
+    let targetYear = explicitYear ?? currentYear;
+
+    if (!explicitYear) {
+      if (modifier === "last") {
+        targetYear = currentYear - 1;
+      } else if (modifier !== "this") {
+        if (currentMonth <= endM) {
+          targetYear = currentYear - 1;
+        }
+      }
+    }
+
+    if (season === "winter") {
+      const startLocal = new Date(targetYear, 11, 1);
+      const endLocal = endOfMonth(new Date(targetYear + 1, 1, 1));
+      return {
+        ...toUtcRange(startLocal, endLocal),
+        label: seasonMatch[0],
+        matchedPhrases: [seasonMatch[0]],
+      };
+    } else {
+      const startLocal = new Date(targetYear, startM, 1);
+      const endLocal = endOfMonth(new Date(targetYear, endM, 1));
+      return {
+        ...toUtcRange(startLocal, endLocal),
+        label: seasonMatch[0],
+        matchedPhrases: [seasonMatch[0]],
+      };
+    }
+  }
+
+  const monthNamesPattern = Object.keys(MONTH_MAP).join("|");
+  const dmyRegex = new RegExp(
+    `\\b(\\d{1,2})\\s+(${monthNamesPattern})\\s+(20\\d{2})\\b`
+  );
+  const dmyMatch = normalized.match(dmyRegex);
+  if (dmyMatch) {
+    const day = Number(dmyMatch[1]);
+    const monthIdx = MONTH_MAP[dmyMatch[2]];
+    const year = Number(dmyMatch[3]);
+    const specificDate = new Date(year, monthIdx, day);
+    return {
+      ...toUtcRange(specificDate, specificDate),
+      label: dmyMatch[0],
+      matchedPhrases: [dmyMatch[0]],
+    };
+  }
+
+  const myRegex = new RegExp(`\\b(${monthNamesPattern})\\s+(20\\d{2})\\b`);
+  const myMatch = normalized.match(myRegex);
+  if (myMatch) {
+    const monthIdx = MONTH_MAP[myMatch[1]];
+    const year = Number(myMatch[2]);
+    const mStart = new Date(year, monthIdx, 1);
+    const mEnd = endOfMonth(mStart);
+    return {
+      ...toUtcRange(mStart, mEnd),
+      label: myMatch[0],
+      matchedPhrases: [myMatch[0]],
+    };
+  }
+
+  const yearMatch = normalized.match(/\b(20\d{2})\b/);
+  if (yearMatch) {
+    const year = Number(yearMatch[1]);
+    const yStart = new Date(year, 0, 1);
+    const yEnd = new Date(year, 11, 31);
+    return {
+      ...toUtcRange(yStart, yEnd),
+      label: yearMatch[1],
+      matchedPhrases: [yearMatch[0]],
+    };
+  }
+
+  return { matchedPhrases: [] };
+}
+
+=== lib/ai/extract-keywords.ts ===
+const STOPWORDS = new Set([
+  "the",
+  "a",
+  "an",
+  "that",
+  "this",
+  "some",
+  "something",
+  "event",
+  "events",
+  "i",
+  "my",
+  "me",
+  "we",
+  "at",
+  "in",
+  "on",
+  "to",
+  "for",
+  "of",
+  "by",
+  "with",
+  "from",
+  "last",
+  "was",
+  "were",
+  "had",
+  "have",
+  "did",
+  "find",
+  "show",
+  "search",
+  "about",
+  "where",
+  "when",
+  "what",
+]);
+
+function bigrams(str: string): Set<string> {
+  const s = str.toLowerCase().trim();
+  const result = new Set<string>();
+  for (let i = 0; i < s.length - 1; i++) {
+    result.add(s.slice(i, i + 2));
+  }
+  return result;
+}
+
+export function diceSimilarity(a: string, b: string): number {
+  const cleanA = a.toLowerCase().trim();
+  const cleanB = b.toLowerCase().trim();
+  if (cleanA === cleanB) return 1;
+  if (cleanA.length < 2 || cleanB.length < 2) return 0;
+
+  const bgA = bigrams(cleanA);
+  const bgB = bigrams(cleanB);
+  let intersection = 0;
+  for (const gram of bgA) {
+    if (bgB.has(gram)) intersection += 1;
+  }
+  return (2 * intersection) / (bgA.size + bgB.size);
+}
+
+/**
+ * Pipeline Step 4: Match against faculty member's previously used locations (fuzzy match >= 0.8).
+ */
+export function extractLocation(
+  normalized: string,
+  knownLocations: string[]
+): { location?: string; matchedPhrase?: string } {
+  const sortedLocations = [...knownLocations]
+    .filter((l) => l.trim().length > 0)
+    .sort((a, b) => b.length - a.length);
+
+  for (const loc of sortedLocations) {
+    const normLoc = loc.toLowerCase().trim();
+    if (normalized.includes(normLoc)) {
+      return { location: loc, matchedPhrase: normLoc };
+    }
+
+    const locWords = normLoc.split(/\s+/);
+    const queryWords = normalized.split(/\s+/);
+    const windowSize = locWords.length;
+
+    if (queryWords.length >= windowSize) {
+      for (let i = 0; i <= queryWords.length - windowSize; i++) {
+        const candidate = queryWords.slice(i, i + windowSize).join(" ");
+        if (diceSimilarity(candidate, normLoc) >= 0.8) {
+          return { location: loc, matchedPhrase: candidate };
+        }
+      }
+    }
+  }
+
+  return {};
+}
+
+/**
+ * Pipeline Step 5: Remove stopwords and matched date, type, and location phrases; keep the rest.
+ */
+export function extractKeywords(
+  normalized: string,
+  phrasesToRemove: string[]
+): string[] {
+  let working = ` ${normalized} `;
+  for (const phrase of phrasesToRemove) {
+    if (!phrase) continue;
+    const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    working = working.replace(new RegExp(`\\b${escaped}\\b`, "gi"), " ");
+  }
+
+  const tokens = working
+    .trim()
+    .split(/\s+/)
+    .map((t) => t.replace(/^\.+|\.+$/g, ""))
+    .filter((t) => t.length >= 2 && !STOPWORDS.has(t));
+
+  return Array.from(new Set(tokens));
+}
+
+=== lib/ai/parse.ts ===
+import { StructuredAiFilter } from "@/lib/validation/ai";
+import { normalizeQuery } from "./normalize";
+import { detectEventType } from "./detect-type";
+import { extractDateRange } from "./extract-date";
+import { extractLocation, extractKeywords } from "./extract-keywords";
+
+/**
+ * Pipeline Step 6: Orchestrate steps 1–5 to build a structured filter.
+ */
+export function parseSearchQueryRuleBased(
+  rawMessage: string,
+  knownLocations: string[],
+  referenceNow: Date = new Date()
+): StructuredAiFilter {
+  const normalized = normalizeQuery(rawMessage);
+  if (!normalized) {
+    return { keywords: [] };
+  }
+
+  const typeResult = detectEventType(normalized);
+  const dateResult = extractDateRange(normalized, referenceNow);
+  const locationResult = extractLocation(normalized, knownLocations);
+
+  const phrasesToStrip = [
+    ...typeResult.matchedPhrases,
+    ...dateResult.matchedPhrases,
+    ...(locationResult.matchedPhrase ? [locationResult.matchedPhrase] : []),
+  ];
+
+  const keywords = extractKeywords(normalized, phrasesToStrip);
+
+  return {
+    type: typeResult.type,
+    from: dateResult.from,
+    to: dateResult.to,
+    dateLabel: dateResult.label,
+    location: locationResult.location,
+    keywords,
+  };
+}
+
+=== lib/ai/score.ts ===
+import { Event } from "@prisma/client";
+import { StructuredAiFilter } from "@/lib/validation/ai";
+
+export interface ScoredEventResult {
+  event: Event;
+  score: number;
+  matchReasons: string[];
+}
+
+/**
+ * Pipeline Step 8: Score and rank candidate events.
+ * - Date falls inside range: +40
+ * - Each keyword found in title: +15; in description, organizer, or location: +5
+ * - Type matches: +10
+ * - Location matches: +15
+ * - Results with score 0 are excluded. Return top 5.
+ */
+export function scoreAndRankEvents(
+  events: Event[],
+  filter: StructuredAiFilter
+): ScoredEventResult[] {
+  const scored: ScoredEventResult[] = [];
+
+  for (const ev of events) {
+    let score = 0;
+    const reasons: string[] = [];
+
+    if (filter.from && filter.to) {
+      if (ev.startAt >= filter.from && ev.startAt <= filter.to) {
+        score += 40;
+        reasons.push(filter.dateLabel || "date range");
+      }
+    }
+
+    if (filter.type && ev.type === filter.type) {
+      score += 10;
+      reasons.push(filter.type.toLowerCase());
+    }
+
+    if (
+      filter.location &&
+      ev.location &&
+      ev.location.toLowerCase().includes(filter.location.toLowerCase())
+    ) {
+      score += 15;
+      reasons.push(filter.location);
+    }
+
+    const titleLower = ev.title.toLowerCase();
+    const secondaryBlob = [ev.description, ev.organizer, ev.location]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+
+    for (const kw of filter.keywords) {
+      const kwLower = kw.toLowerCase();
+      let matchedKw = false;
+
+      if (titleLower.includes(kwLower)) {
+        score += 15;
+        matchedKw = true;
+      }
+      if (secondaryBlob.includes(kwLower)) {
+        score += 5;
+        matchedKw = true;
+      }
+      if (matchedKw) {
+        reasons.push(kw);
+      }
+    }
+
+    if (score > 0) {
+      scored.push({
+        event: ev,
+        score,
+        matchReasons: Array.from(new Set(reasons)),
+      });
+    }
+  }
+
+  return scored
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return b.event.startAt.getTime() - a.event.startAt.getTime();
+    })
+    .slice(0, 5);
+}
+
+=== lib/ai/llm-adapter.ts ===
+import { parsedFilterSchema, StructuredAiFilter } from "@/lib/validation/ai";
+
+export function isLlmModeEnabled(): boolean {
+  return Boolean(
+    process.env.AI_PROVIDER?.trim() && process.env.AI_API_KEY?.trim()
+  );
+}
+
+/**
+ * Stretch S1: Optional LLM query parser with strict 8-second timeout and Zod validation.
+ */
+export async function parseQueryWithLlm(
+  message: string,
+  referenceNow: Date = new Date()
+): Promise<StructuredAiFilter | null> {
+  if (!isLlmModeEnabled()) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+
+  try {
+    const apiKey = process.env.AI_API_KEY!;
+    const systemPrompt = [
+      `Today is ${referenceNow.toISOString()}.`,
+      `Convert the user's event search query into a JSON object with optional keys:`,
+      `type ("ATTENDED" | "HOSTED" | "BUSY"), from (ISO string), to (ISO string), keywords (string array), location (string), dateLabel (string).`,
+      `Return ONLY valid JSON.`,
+    ].join(" ");
+
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: message },
+        ],
+        temperature: 0,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) return null;
+    const data = await res.json();
+    const rawContent = data?.choices?.[0]?.message?.content;
+    if (!rawContent) return null;
+
+    const parsedJson = JSON.parse(rawContent);
+    return parsedFilterSchema.parse(parsedJson);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+=== app/api/auth/register/route.ts ===
+import { NextRequest, NextResponse } from "next/server";
+import { ZodError } from "zod";
+import { prisma } from "@/lib/db";
+import { registerSchema } from "@/lib/validation/auth";
+import { hashPassword } from "@/lib/auth/password";
+import { signSessionToken } from "@/lib/auth/jwt";
+import { setSessionCookie, toPublicProfile } from "@/lib/auth/provider";
+import { apiError, handleZodError, logRequest } from "@/lib/api-response";
+
+export async function POST(req: NextRequest) {
+  const startMs = Date.now();
+  const path = "/api/auth/register";
+
+  try {
+    const body = await req.json();
+    const parsed = registerSchema.parse(body);
+
+    const existing = await prisma.faculty.findFirst({
+      where: {
+        OR: [{ facultyCode: parsed.facultyCode }, { email: parsed.email }],
+      },
+    });
+
+    if (existing) {
+      const isCodeDup = existing.facultyCode === parsed.facultyCode;
+      logRequest(path, 409, startMs);
+      return apiError(
+        "CONFLICT",
+        isCodeDup
+          ? "A faculty member with this Faculty ID already exists."
+          : "An account with this email already exists.",
+        409,
+        isCodeDup
+          ? { facultyCode: "Faculty ID is already registered." }
+          : { email: "Email is already registered." }
+      );
+    }
+
+    const passwordHash = await hashPassword(parsed.password);
+    const created = await prisma.faculty.create({
+      data: {
+        facultyCode: parsed.facultyCode,
+        fullName: parsed.fullName,
+        email: parsed.email,
+        department: parsed.department,
+        passwordHash,
+      },
+    });
+
+    const token = await signSessionToken({
+      facultyId: created.id,
+      facultyCode: created.facultyCode,
+      email: created.email,
+    });
+
+    const res = NextResponse.json(
+      { faculty: toPublicProfile(created) },
+      { status: 201 }
+    );
+    setSessionCookie(res, token);
+    logRequest(path, 201, startMs);
+    return res;
+  } catch (err) {
+    if (err instanceof ZodError) {
+      logRequest(path, 400, startMs);
+      return handleZodError(err);
+    }
+    logRequest(path, 500, startMs);
+    return apiError("INTERNAL_ERROR", "Unable to complete registration.", 500);
+  }
+}
+
+=== app/api/auth/login/route.ts ===
+import { NextRequest, NextResponse } from "next/server";
+import { ZodError } from "zod";
+import { loginSchema } from "@/lib/validation/auth";
+import {
+  authProvider,
+  setSessionCookie,
+} from "@/lib/auth/provider";
+import {
+  checkLoginRateLimit,
+  recordFailedLogin,
+  clearLoginRateLimit,
+} from "@/lib/auth/rate-limit";
+import { apiError, handleZodError, logRequest } from "@/lib/api-response";
+
+export async function POST(req: NextRequest) {
+  const startMs = Date.now();
+  const path = "/api/auth/login";
+
+  try {
+    const body = await req.json();
+    const { facultyCode, password } = loginSchema.parse(body);
+
+    const rateCheck = checkLoginRateLimit(facultyCode);
+    if (!rateCheck.allowed) {
+      logRequest(path, 429, startMs);
+      return apiError(
+        "RATE_LIMITED",
+        "Too many attempts, try again later.",
+        429
+      );
+    }
+
+    const result = await authProvider.signIn(facultyCode, password);
+    if (!result) {
+      recordFailedLogin(facultyCode);
+      logRequest(path, 401, startMs);
+      return apiError(
+        "UNAUTHORIZED",
+        "Faculty ID or password is incorrect.",
+        401
+      );
+    }
+
+    clearLoginRateLimit(facultyCode);
+    const res = NextResponse.json({ faculty: result.profile }, { status: 200 });
+    setSessionCookie(res, result.token);
+    logRequest(path, 200, startMs);
+    return res;
+  } catch (err) {
+    if (err instanceof ZodError) {
+      logRequest(path, 400, startMs);
+      return handleZodError(err);
+    }
+    logRequest(path, 500, startMs);
+    return apiError("INTERNAL_ERROR", "Unable to sign in.", 500);
+  }
+}
+
+=== app/api/auth/logout/route.ts ===
+import { NextResponse } from "next/server";
+import { authProvider } from "@/lib/auth/provider";
+import { logRequest } from "@/lib/api-response";
+
+export async function POST() {
+  const startMs = Date.now();
+  const res = NextResponse.json({ ok: true }, { status: 200 });
+  authProvider.signOut(res);
+  logRequest("/api/auth/logout", 200, startMs);
+  return res;
+}
+
+=== app/api/auth/me/route.ts ===
+import { NextRequest, NextResponse } from "next/server";
+import { ZodError } from "zod";
+import { prisma } from "@/lib/db";
+import { authProvider, toPublicProfile } from "@/lib/auth/provider";
+import {
+  updateProfileSchema,
+  deleteAccountSchema,
+} from "@/lib/validation/auth";
+import { apiError, handleZodError, logRequest } from "@/lib/api-response";
+
+export async function GET() {
+  const startMs = Date.now();
+  const path = "/api/auth/me";
+
+  const session = await authProvider.getSession();
+  if (!session) {
+    logRequest(path, 401, startMs);
+    return apiError("UNAUTHORIZED", "Authentication required.", 401);
+  }
+
+  const faculty = await prisma.faculty.findUnique({
+    where: { id: session.facultyId },
+  });
+
+  if (!faculty) {
+    logRequest(path, 401, startMs);
+    return apiError("UNAUTHORIZED", "Session is no longer valid.", 401);
+  }
+
+  logRequest(path, 200, startMs);
+  return NextResponse.json({ faculty: toPublicProfile(faculty) });
+}
+
+export async function PATCH(req: NextRequest) {
+  const startMs = Date.now();
+  const path = "/api/auth/me";
+
+  const session = await authProvider.getSession();
+  if (!session) {
+    logRequest(path, 401, startMs);
+    return apiError("UNAUTHORIZED", "Authentication required.", 401);
+  }
+
+  try {
+    const body = await req.json();
+    const patch = updateProfileSchema.parse(body);
+
+    if (patch.email) {
+      const emailOwner = await prisma.faculty.findUnique({
+        where: { email: patch.email },
+      });
+      if (emailOwner && emailOwner.id !== session.facultyId) {
+        logRequest(path, 409, startMs);
+        return apiError("CONFLICT", "Email is already in use.", 409, {
+          email: "Email is already in use by another account.",
+        });
+      }
+    }
+
+    const updated = await prisma.faculty.update({
+      where: { id: session.facultyId },
+      data: patch,
+    });
+
+    logRequest(path, 200, startMs);
+    return NextResponse.json({ faculty: toPublicProfile(updated) });
+  } catch (err) {
+    if (err instanceof ZodError) {
+      logRequest(path, 400, startMs);
+      return handleZodError(err);
+    }
+    logRequest(path, 500, startMs);
+    return apiError("INTERNAL_ERROR", "Unable to update profile.", 500);
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  const startMs = Date.now();
+  const path = "/api/auth/me";
+
+  const session = await authProvider.getSession();
+  if (!session) {
+    logRequest(path, 401, startMs);
+    return apiError("UNAUTHORIZED", "Authentication required.", 401);
+  }
+
+  try {
+    const body = await req.json();
+    const { confirmFacultyCode } = deleteAccountSchema.parse(body);
+
+    if (confirmFacultyCode.toUpperCase() !== session.facultyCode) {
+      logRequest(path, 400, startMs);
+      return apiError(
+        "VALIDATION_ERROR",
+        "Faculty ID confirmation does not match your account.",
+        400,
+        { confirmFacultyCode: "Must match your exact Faculty ID." }
+      );
+    }
+
+    await prisma.faculty.delete({
+      where: { id: session.facultyId },
+    });
+
+    const res = NextResponse.json({ deleted: true }, { status: 200 });
+    authProvider.signOut(res);
+    logRequest(path, 200, startMs);
+    return res;
+  } catch (err) {
+    if (err instanceof ZodError) {
+      logRequest(path, 400, startMs);
+      return handleZodError(err);
+    }
+    logRequest(path, 500, startMs);
+    return apiError("INTERNAL_ERROR", "Unable to delete account.", 500);
+  }
+}
+
+=== app/api/auth/change-password/route.ts ===
+import { NextRequest, NextResponse } from "next/server";
+import { ZodError } from "zod";
+import { prisma } from "@/lib/db";
+import { authProvider } from "@/lib/auth/provider";
+import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import { changePasswordSchema } from "@/lib/validation/auth";
+import { apiError, handleZodError, logRequest } from "@/lib/api-response";
+
+export async function POST(req: NextRequest) {
+  const startMs = Date.now();
+  const path = "/api/auth/change-password";
+
+  const session = await authProvider.getSession();
+  if (!session) {
+    logRequest(path, 401, startMs);
+    return apiError("UNAUTHORIZED", "Authentication required.", 401);
+  }
+
+  try {
+    const body = await req.json();
+    const { currentPassword, newPassword } = changePasswordSchema.parse(body);
+
+    const faculty = await prisma.faculty.findUnique({
+      where: { id: session.facultyId },
+    });
+    if (!faculty) {
+      logRequest(path, 401, startMs);
+      return apiError("UNAUTHORIZED", "Account not found.", 401);
+    }
+
+    const matches = await verifyPassword(currentPassword, faculty.passwordHash);
+    if (!matches) {
+      logRequest(path, 400, startMs);
+      return apiError(
+        "VALIDATION_ERROR",
+        "Current password is incorrect.",
+        400,
+        { currentPassword: "Current password is incorrect." }
+      );
+    }
+
+    const passwordHash = await hashPassword(newPassword);
+    await prisma.faculty.update({
+      where: { id: session.facultyId },
+      data: { passwordHash },
+    });
+
+    logRequest(path, 200, startMs);
+    return NextResponse.json({ ok: true }, { status: 200 });
+  } catch (err) {
+    if (err instanceof ZodError) {
+      logRequest(path, 400, startMs);
+      return handleZodError(err);
+    }
+    logRequest(path, 500, startMs);
+    return apiError("INTERNAL_ERROR", "Unable to change password.", 500);
+  }
+}
+
+=== app/api/events/route.ts ===
+import { NextRequest, NextResponse } from "next/server";
+import { ZodError } from "zod";
+import { authProvider } from "@/lib/auth/provider";
+import {
+  createEventSchema,
+  listEventsQuerySchema,
+} from "@/lib/validation/event";
+import {
+  createFacultyEvent,
+  listFacultyEvents,
+} from "@/lib/events/queries";
+import { findOverlappingEvents } from "@/lib/events/overlap";
+import { apiError, handleZodError, logRequest } from "@/lib/api-response";
+
+export async function GET(req: NextRequest) {
+  const startMs = Date.now();
+  const path = "/api/events";
+
+  const session = await authProvider.getSession();
+  if (!session) {
+    logRequest(path, 401, startMs);
+    return apiError("UNAUTHORIZED", "Authentication required.", 401);
+  }
+
+  try {
+    const rawParams = Object.fromEntries(req.nextUrl.searchParams.entries());
+    const filters = listEventsQuerySchema.parse(rawParams);
+    const result = await listFacultyEvents(session.facultyId, filters);
+
+    logRequest(path, 200, startMs);
+    return NextResponse.json(result);
+  } catch (err) {
+    if (err instanceof ZodError) {
+      logRequest(path, 400, startMs);
+      return handleZodError(err);
+    }
+    logRequest(path, 500, startMs);
+    return apiError("INTERNAL_ERROR", "Failed to load events.", 500);
+  }
+}
+
+export async function POST(req: NextRequest) {
+  const startMs = Date.now();
+  const path = "/api/events";
+
+  const session = await authProvider.getSession();
+  if (!session) {
+    logRequest(path, 401, startMs);
+    return apiError("UNAUTHORIZED", "Authentication required.", 401);
+  }
+
+  try {
+    const body = await req.json();
+    const input = createEventSchema.parse(body);
+
+    const overlaps = await findOverlappingEvents({
+      facultyId: session.facultyId,
+      startAt: input.startAt,
+      endAt: input.endAt,
+    });
+
+    const created = await createFacultyEvent(session.facultyId, input);
+
+    logRequest(path, 201, startMs);
+    return NextResponse.json(
+      {
+        event: created,
+        overlaps,
+        warning:
+          overlaps.length > 0
+            ? `This overlaps with '${overlaps[0].title}'.`
+            : null,
+      },
+      { status: 201 }
+    );
+  } catch (err) {
+    if (err instanceof ZodError) {
+      logRequest(path, 400, startMs);
+      return handleZodError(err);
+    }
+    logRequest(path, 500, startMs);
+    return apiError("INTERNAL_ERROR", "Failed to create event.", 500);
+  }
+}
+
+=== app/api/events/[id]/route.ts ===
+import { NextRequest, NextResponse } from "next/server";
+import { ZodError } from "zod";
+import { authProvider } from "@/lib/auth/provider";
+import { updateEventSchema } from "@/lib/validation/event";
+import {
+  getFacultyEventById,
+  updateFacultyEvent,
+  deleteFacultyEvent,
+} from "@/lib/events/queries";
+import { apiError, handleZodError, logRequest } from "@/lib/api-response";
+
+interface RouteContext {
+  params: Promise<{ id: string }>;
+}
+
+export async function GET(_req: NextRequest, context: RouteContext) {
+  const startMs = Date.now();
+  const { id } = await context.params;
+  const path = `/api/events/${id}`;
+
+  const session = await authProvider.getSession();
+  if (!session) {
+    logRequest(path, 401, startMs);
+    return apiError("UNAUTHORIZED", "Authentication required.", 401);
+  }
+
+  const event = await getFacultyEventById(session.facultyId, id);
+  if (!event) {
+    logRequest(path, 404, startMs);
+    return apiError("NOT_FOUND", "Event not found.", 404);
+  }
+
+  logRequest(path, 200, startMs);
+  return NextResponse.json({ event });
+}
+
+export async function PATCH(req: NextRequest, context: RouteContext) {
+  const startMs = Date.now();
+  const { id } = await context.params;
+  const path = `/api/events/${id}`;
+
+  const session = await authProvider.getSession();
+  if (!session) {
+    logRequest(path, 401, startMs);
+    return apiError("UNAUTHORIZED", "Authentication required.", 401);
+  }
+
+  try {
+    const body = await req.json();
+    const patch = updateEventSchema.parse(body);
+
+    const updated = await updateFacultyEvent(session.facultyId, id, patch);
+    if (!updated) {
+      logRequest(path, 404, startMs);
+      return apiError("NOT_FOUND", "Event not found.", 404);
+    }
+
+    logRequest(path, 200, startMs);
+    return NextResponse.json({ event: updated });
+  } catch (err) {
+    if (err instanceof ZodError) {
+      logRequest(path, 400, startMs);
+      return handleZodError(err);
+    }
+    if (err instanceof Error && err.message === "INVALID_DATE_ORDER") {
+      logRequest(path, 400, startMs);
+      return apiError(
+        "VALIDATION_ERROR",
+        "End time must be after or equal to start time.",
+        400,
+        { endAt: "End time must be after or equal to start time." }
+      );
+    }
+    logRequest(path, 500, startMs);
+    return apiError("INTERNAL_ERROR", "Failed to update event.", 500);
+  }
+}
+
+export async function DELETE(_req: NextRequest, context: RouteContext) {
+  const startMs = Date.now();
+  const { id } = await context.params;
+  const path = `/api/events/${id}`;
+
+  const session = await authProvider.getSession();
+  if (!session) {
+    logRequest(path, 401, startMs);
+    return apiError("UNAUTHORIZED", "Authentication required.", 401);
+  }
+
+  const deleted = await deleteFacultyEvent(session.facultyId, id);
+  if (!deleted) {
+    logRequest(path, 404, startMs);
+    return apiError("NOT_FOUND", "Event not found.", 404);
+  }
+
+  logRequest(path, 204, startMs);
+  return new NextResponse(null, { status: 204 });
+}
+
+=== app/api/events/[id]/duplicate/route.ts ===
+import { NextRequest, NextResponse } from "next/server";
+import { ZodError } from "zod";
+import { authProvider } from "@/lib/auth/provider";
+import { duplicateEventSchema } from "@/lib/validation/event";
+import { duplicateFacultyEvent } from "@/lib/events/queries";
+import { apiError, handleZodError, logRequest } from "@/lib/api-response";
+
+interface RouteContext {
+  params: Promise<{ id: string }>;
+}
+
+export async function POST(req: NextRequest, context: RouteContext) {
+  const startMs = Date.now();
+  const { id } = await context.params;
+  const path = `/api/events/${id}/duplicate`;
+
+  const session = await authProvider.getSession();
+  if (!session) {
+    logRequest(path, 401, startMs);
+    return apiError("UNAUTHORIZED", "Authentication required.", 401);
+  }
+
+  try {
+    const body = await req.json().catch(() => ({}));
+    const { startAt } = duplicateEventSchema.parse(body);
+
+    const duplicated = await duplicateFacultyEvent(
+      session.facultyId,
+      id,
+      startAt
+    );
+
+    if (!duplicated) {
+      logRequest(path, 404, startMs);
+      return apiError("NOT_FOUND", "Event not found.", 404);
+    }
+
+    logRequest(path, 201, startMs);
+    return NextResponse.json({ event: duplicated }, { status: 201 });
+  } catch (err) {
+    if (err instanceof ZodError) {
+      logRequest(path, 400, startMs);
+      return handleZodError(err);
+    }
+    logRequest(path, 500, startMs);
+    return apiError("INTERNAL_ERROR", "Failed to duplicate event.", 500);
+  }
+}
+
+=== app/api/events/overlaps/route.ts ===
+import { NextRequest, NextResponse } from "next/server";
+import { z, ZodError } from "zod";
+import { authProvider } from "@/lib/auth/provider";
+import { findOverlappingEvents } from "@/lib/events/overlap";
+import { apiError, handleZodError, logRequest } from "@/lib/api-response";
+
+const overlapQuerySchema = z
+  .object({
+    startAt: z.coerce.date(),
+    endAt: z.coerce.date(),
+    excludeId: z.string().optional(),
+  })
+  .strict();
+
+export async function GET(req: NextRequest) {
+  const startMs = Date.now();
+  const path = "/api/events/overlaps";
+
+  const session = await authProvider.getSession();
+  if (!session) {
+    logRequest(path, 401, startMs);
+    return apiError("UNAUTHORIZED", "Authentication required.", 401);
+  }
+
+  try {
+    const rawParams = Object.fromEntries(req.nextUrl.searchParams.entries());
+    const { startAt, endAt, excludeId } = overlapQuerySchema.parse(rawParams);
+
+    const overlaps = await findOverlappingEvents({
+      facultyId: session.facultyId,
+      startAt,
+      endAt,
+      excludeId,
+    });
+
+    logRequest(path, 200, startMs);
+    return NextResponse.json({
+      overlaps,
+      warning:
+        overlaps.length > 0
+          ? `This overlaps with '${overlaps[0].title}'.`
+          : null,
+    });
+  } catch (err) {
+    if (err instanceof ZodError) {
+      logRequest(path, 400, startMs);
+      return handleZodError(err);
+    }
+    logRequest(path, 500, startMs);
+    return apiError("INTERNAL_ERROR", "Failed to check overlaps.", 500);
+  }
+}
+
+=== app/api/events/departments/route.ts ===
+import { NextResponse } from "next/server";
+import { authProvider } from "@/lib/auth/provider";
+import { getFacultyDepartmentsList } from "@/lib/events/queries";
+import { apiError, logRequest } from "@/lib/api-response";
+
+export async function GET() {
+  const startMs = Date.now();
+  const path = "/api/events/departments";
+
+  const session = await authProvider.getSession();
+  if (!session) {
+    logRequest(path, 401, startMs);
+    return apiError("UNAUTHORIZED", "Authentication required.", 401);
+  }
+
+  const departments = await getFacultyDepartmentsList(session.facultyId);
+  logRequest(path, 200, startMs);
+  return NextResponse.json({ departments });
+}
+
+=== app/api/calendar/route.ts ===
+import { NextRequest, NextResponse } from "next/server";
+import { z, ZodError } from "zod";
+import { prisma } from "@/lib/db";
+import { authProvider } from "@/lib/auth/provider";
+import { buildEventWhereClause } from "@/lib/events/queries";
+import { formatDateKeyInAppTz } from "@/lib/time";
+import { apiError, handleZodError, logRequest } from "@/lib/api-response";
+
+const calendarQuerySchema = z
+  .object({
+    from: z.coerce.date(),
+    to: z.coerce.date(),
+    type: z.string().optional(),
+    department: z.string().optional(),
+    q: z.string().optional(),
+  })
+  .strict();
+
+export async function GET(req: NextRequest) {
+  const startMs = Date.now();
+  const path = "/api/calendar";
+
+  const session = await authProvider.getSession();
+  if (!session) {
+    logRequest(path, 401, startMs);
+    return apiError("UNAUTHORIZED", "Authentication required.", 401);
+  }
+
+  try {
+    const rawParams = Object.fromEntries(req.nextUrl.searchParams.entries());
+    const filters = calendarQuerySchema.parse(rawParams);
+
+    const where = buildEventWhereClause(session.facultyId, filters);
+    const events = await prisma.event.findMany({
+      where,
+      orderBy: { startAt: "asc" },
+    });
+
+    const groupedByDate: Record<string, typeof events> = {};
+    for (const ev of events) {
+      const dateKey = formatDateKeyInAppTz(ev.startAt);
+      if (!groupedByDate[dateKey]) {
+        groupedByDate[dateKey] = [];
+      }
+      groupedByDate[dateKey].push(ev);
+    }
+
+    logRequest(path, 200, startMs);
+    return NextResponse.json({
+      events,
+      groupedByDate,
+    });
+  } catch (err) {
+    if (err instanceof ZodError) {
+      logRequest(path, 400, startMs);
+      return handleZodError(err);
+    }
+    logRequest(path, 500, startMs);
+    return apiError("INTERNAL_ERROR", "Failed to load calendar events.", 500);
+  }
+}
+
+=== app/api/achievements/route.ts ===
+import { NextRequest, NextResponse } from "next/server";
+import { z, ZodError } from "zod";
+import { prisma } from "@/lib/db";
+import { authProvider } from "@/lib/auth/provider";
+import { buildEventWhereClause } from "@/lib/events/queries";
+import { calculateAchievementsFromEvents } from "@/lib/achievements/metrics";
+import { apiError, handleZodError, logRequest } from "@/lib/api-response";
+
+const achievementsQuerySchema = z
+  .object({
+    from: z.coerce.date().optional(),
+    to: z.coerce.date().optional(),
+    type: z.string().optional(),
+    department: z.string().optional(),
+  })
+  .strict();
+
+export async function GET(req: NextRequest) {
+  const startMs = Date.now();
+  const path = "/api/achievements";
+
+  const session = await authProvider.getSession();
+  if (!session) {
+    logRequest(path, 401, startMs);
+    return apiError("UNAUTHORIZED", "Authentication required.", 401);
+  }
+
+  try {
+    const rawParams = Object.fromEntries(req.nextUrl.searchParams.entries());
+    const filters = achievementsQuerySchema.parse(rawParams);
+
+    const where = buildEventWhereClause(session.facultyId, filters);
+    const events = await prisma.event.findMany({
+      where,
+      select: {
+        type: true,
+        startAt: true,
+        endAt: true,
+        department: true,
+      },
+      orderBy: { startAt: "asc" },
+    });
+
+    const data = calculateAchievementsFromEvents(events);
+    logRequest(path, 200, startMs);
+    return NextResponse.json(data);
+  } catch (err) {
+    if (err instanceof ZodError) {
+      logRequest(path, 400, startMs);
+      return handleZodError(err);
+    }
+    logRequest(path, 500, startMs);
+    return apiError("INTERNAL_ERROR", "Failed to calculate achievements.", 500);
+  }
+}
+
+=== app/api/reports/route.ts ===
+import { NextRequest, NextResponse } from "next/server";
+import { ZodError } from "zod";
+import { authProvider } from "@/lib/auth/provider";
+import { reportQuerySchema } from "@/lib/validation/report";
+import { buildFacultyReport } from "@/lib/reports/build";
+import { apiError, handleZodError, logRequest } from "@/lib/api-response";
+
+export async function GET(req: NextRequest) {
+  const startMs = Date.now();
+  const path = "/api/reports";
+
+  const session = await authProvider.getSession();
+  if (!session) {
+    logRequest(path, 401, startMs);
+    return apiError("UNAUTHORIZED", "Authentication required.", 401);
+  }
+
+  try {
+    const rawParams = Object.fromEntries(req.nextUrl.searchParams.entries());
+    const parsed = reportQuerySchema.parse(rawParams);
+
+    const report = await buildFacultyReport({
+      facultyId: session.facultyId,
+      from: parsed.from,
+      to: parsed.to,
+      type: parsed.type,
+      department: parsed.department,
+      title: parsed.title,
+    });
+
+    logRequest(path, 200, startMs);
+    return NextResponse.json({ report });
+  } catch (err) {
+    if (err instanceof ZodError) {
+      logRequest(path, 400, startMs);
+      return handleZodError(err);
+    }
+    logRequest(path, 500, startMs);
+    return apiError("INTERNAL_ERROR", "Failed to generate report.", 500);
+  }
+}
+
+=== app/api/reports/export/route.ts ===
+import { NextRequest, NextResponse } from "next/server";
+import { ZodError } from "zod";
+import { authProvider } from "@/lib/auth/provider";
+import { reportQuerySchema } from "@/lib/validation/report";
+import { buildFacultyReport } from "@/lib/reports/build";
+import { generateReportCsv } from "@/lib/reports/csv";
+import { generateReportXlsx } from "@/lib/reports/xlsx";
+import { apiError, handleZodError, logRequest } from "@/lib/api-response";
+
+export async function GET(req: NextRequest) {
+  const startMs = Date.now();
+  const path = "/api/reports/export";
+
+  const session = await authProvider.getSession();
+  if (!session) {
+    logRequest(path, 401, startMs);
+    return apiError("UNAUTHORIZED", "Authentication required.", 401);
+  }
+
+  try {
+    const rawParams = Object.fromEntries(req.nextUrl.searchParams.entries());
+    const parsed = reportQuerySchema.parse(rawParams);
+    const format = parsed.format ?? "csv";
+
+    const report = await buildFacultyReport({
+      facultyId: session.facultyId,
+      from: parsed.from,
+      to: parsed.to,
+      type: parsed.type,
+      department: parsed.department,
+      title: parsed.title,
+    });
+
+    const baseFileName = `FacultyPulse_${report.header.facultyCode}_${report.header.from}_to_${report.header.to}`;
+
+    if (format === "xlsx") {
+      const buffer = generateReportXlsx(report);
+      logRequest(path, 200, startMs);
+      return new NextResponse(buffer, {
+        status: 200,
+        headers: {
+          "Content-Type":
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": `attachment; filename="${baseFileName}.xlsx"`,
+        },
+      });
+    }
+
+    const csvContent = generateReportCsv(report);
+    logRequest(path, 200, startMs);
+    return new NextResponse(csvContent, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${baseFileName}.csv"`,
+      },
+    });
+  } catch (err) {
+    if (err instanceof ZodError) {
+      logRequest(path, 400, startMs);
+      return handleZodError(err);
+    }
+    logRequest(path, 500, startMs);
+    return apiError("INTERNAL_ERROR", "Failed to export report.", 500);
+  }
+}
+
+=== app/api/ai/status/route.ts ===
+import { NextResponse } from "next/server";
+import { authProvider } from "@/lib/auth/provider";
+import { isLlmModeEnabled } from "@/lib/ai/llm-adapter";
+import { apiError, logRequest } from "@/lib/api-response";
+
+export async function GET() {
+  const startMs = Date.now();
+  const path = "/api/ai/status";
+
+  const session = await authProvider.getSession();
+  if (!session) {
+    logRequest(path, 401, startMs);
+    return apiError("UNAUTHORIZED", "Authentication required.", 401);
+  }
+
+  logRequest(path, 200, startMs);
+  return NextResponse.json({
+    mode: isLlmModeEnabled() ? "llm" : "rule-based",
+  });
+}
+
+=== app/api/ai/search/route.ts ===
+import { NextRequest, NextResponse } from "next/server";
+import { ZodError } from "zod";
+import { prisma } from "@/lib/db";
+import { authProvider } from "@/lib/auth/provider";
+import { consumeAiRateLimit } from "@/lib/auth/rate-limit";
+import { aiSearchRequestSchema } from "@/lib/validation/ai";
+import { parseSearchQueryRuleBased } from "@/lib/ai/parse";
+import { parseQueryWithLlm, isLlmModeEnabled } from "@/lib/ai/llm-adapter";
+import { scoreAndRankEvents } from "@/lib/ai/score";
+import { apiError, handleZodError, logRequest } from "@/lib/api-response";
+
+const EXAMPLE_PROMPTS = [
+  "that AI workshop last spring",
+  "something in the seminar hall in March 2026",
+  "events I hosted last month",
+  "busy days this semester",
+];
+
+export async function POST(req: NextRequest) {
+  const startMs = Date.now();
+  const path = "/api/ai/search";
+
+  const session = await authProvider.getSession();
+  if (!session) {
+    logRequest(path, 401, startMs);
+    return apiError("UNAUTHORIZED", "Authentication required.", 401);
+  }
+
+  const rateLimit = consumeAiRateLimit(session.facultyId);
+  if (!rateLimit.allowed) {
+    logRequest(path, 429, startMs);
+    return apiError(
+      "RATE_LIMITED",
+      "Rate limit reached (30 searches per hour). Please try again later.",
+      429
+    );
+  }
+
+  try {
+    const body = await req.json();
+    const { message } = aiSearchRequestSchema.parse(body);
+
+    const locationRows = await prisma.event.findMany({
+      where: {
+        facultyId: session.facultyId,
+        location: { not: null },
+      },
+      select: { location: true },
+      distinct: ["location"],
+    });
+    const knownLocations = locationRows
+      .map((r) => r.location)
+      .filter((l): l is string => Boolean(l));
+
+    let understood = isLlmModeEnabled()
+      ? await parseQueryWithLlm(message)
+      : null;
+
+    if (!understood) {
+      understood = parseSearchQueryRuleBased(message, knownLocations);
+    }
+
+    const hasAnyClue = Boolean(
+      understood.type ||
+        understood.from ||
+        understood.to ||
+        understood.location ||
+        understood.keywords.length > 0
+    );
+
+    if (!hasAnyClue) {
+      logRequest(path, 200, startMs);
+      return NextResponse.json({
+        understood,
+        results: [],
+        needsConfirmation: false,
+        suggestions: EXAMPLE_PROMPTS,
+        message:
+          "I couldn't find specific keywords, dates, or places in your message. Try queries like: 'that AI workshop last spring' or 'events I hosted last month'.",
+      });
+    }
+
+    const candidateEvents = await prisma.event.findMany({
+      where: { facultyId: session.facultyId },
+      orderBy: { startAt: "desc" },
+    });
+
+    const ranked = scoreAndRankEvents(candidateEvents, understood);
+    const results = ranked.map((r) => ({
+      ...r.event,
+      score: r.score,
+      matchReasons: r.matchReasons,
+    }));
+
+    if (results.length === 0) {
+      logRequest(path, 200, startMs);
+      return NextResponse.json({
+        understood,
+        results: [],
+        needsConfirmation: false,
+        suggestions: [
+          "Try removing the date filter",
+          "Search using a single keyword from the title",
+        ],
+        message:
+          "No matching events were found in your records. Try broadening your search by removing the date or using a single keyword.",
+      });
+    }
+
+    const needsConfirmation = results.length > 1;
+    const replyMessage = needsConfirmation
+      ? `I found ${results.length} matching events in your records. Is one of these the event you were looking for?`
+      : `I found 1 matching event in your records.`;
+
+    logRequest(path, 200, startMs);
+    return NextResponse.json({
+      understood,
+      results,
+      needsConfirmation,
+      message: replyMessage,
+    });
+  } catch (err) {
+    if (err instanceof ZodError) {
+      logRequest(path, 400, startMs);
+      return handleZodError(err);
+    }
+    logRequest(path, 500, startMs);
+    return apiError("INTERNAL_ERROR", "Search assistant failed.", 500);
+  }
+}
+
+=== tests/ai-acceptance.json ===
+[
+  {
+    "query": "that AI workshop last spring",
+    "expectedTitleSubstring": "AI Workshop"
+  },
+  {
+    "query": "Machine Learning in Education Workshop",
+    "expectedTitleSubstring": "Machine Learning in Education Workshop"
+  },
+  {
+    "query": "events I hosted last month",
+    "expectedType": "HOSTED"
+  },
+  {
+    "query": "busy days this semester",
+    "expectedType": "BUSY"
+  },
+  {
+    "query": "conference on quantum computing",
+    "expectedTitleSubstring": "National Conference on Quantum Computing"
+  },
+  {
+    "query": "guest lecture by Dr. Rao",
+    "expectedTitleSubstring": "Guest Lecture on Sustainable Engineering"
+  },
+  {
+    "query": "something in Main Seminar Hall",
+    "expectedLocation": "Main Seminar Hall"
+  },
+  {
+    "query": "curriculum review meeting I organized",
+    "expectedTitleSubstring": "Department Curriculum Review Meeting"
+  },
+  {
+    "query": "hackathon mentorship panel",
+    "expectedTitleSubstring": "Hackathon Mentorship & Judging Panel"
+  },
+  {
+    "query": "research ethics seminar attended",
+    "expectedTitleSubstring": "Faculty Research Ethics Seminar"
+  }
+]
+
+=== tests/unit/backend.test.ts ===
+import { describe, it, expect } from "vitest";
+import { EventType } from "@prisma/client";
+import { intervalsOverlap } from "@/lib/events/overlap";
+import { detectEventType } from "@/lib/ai/detect-type";
+import { extractDateRange } from "@/lib/ai/extract-date";
+import { parseSearchQueryRuleBased } from "@/lib/ai/parse";
+import { scoreAndRankEvents } from "@/lib/ai/score";
+import { calculateAchievementsFromEvents } from "@/lib/achievements/metrics";
+import { passwordRule, facultyCodeRule } from "@/lib/validation/auth";
+
+describe("Overlap Detection (Section 15.1)", () => {
+  it("returns true for partial and full overlap", () => {
+    const aStart = new Date("2026-03-10T10:00:00Z");
+    const aEnd = new Date("2026-03-10T12:00:00Z");
+    const bStart = new Date("2026-03-10T11:00:00Z");
+    const bEnd = new Date("2026-03-10T13:00:00Z");
+
+    expect(intervalsOverlap(aStart, aEnd, bStart, bEnd)).toBe(true);
+    expect(intervalsOverlap(aStart, aEnd, aStart, aEnd)).toBe(true);
+  });
+
+  it("returns false for adjacent events", () => {
+    const aStart = new Date("2026-03-10T10:00:00Z");
+    const aEnd = new Date("2026-03-10T11:00:00Z");
+    const bStart = new Date("2026-03-10T11:00:00Z");
+    const bEnd = new Date("2026-03-10T12:00:00Z");
+
+    expect(intervalsOverlap(aStart, aEnd, bStart, bEnd)).toBe(false);
+  });
+});
+
+describe("AI Type Detection & Date Extraction (Section 15.1)", () => {
+  it("maps keyword groups to the correct EventType", () => {
+    expect(detectEventType("events i hosted last month").type).toBe(EventType.HOSTED);
+    expect(detectEventType("workshop i attended").type).toBe(EventType.ATTENDED);
+    expect(detectEventType("busy days this semester").type).toBe(EventType.BUSY);
+  });
+
+  it("extracts relative, seasonal, and absolute date ranges accurately", () => {
+    const fixedNow = new Date("2026-10-15T12:00:00Z");
+
+    const spring = extractDateRange("that ai workshop last spring", fixedNow);
+    expect(spring.from).toBeDefined();
+    expect(spring.label).toContain("spring");
+
+    const march2026 = extractDateRange("something in march 2026", fixedNow);
+    expect(march2026.label).toBe("march 2026");
+
+    const year2025 = extractDateRange("conference in 2025", fixedNow);
+    expect(year2025.label).toBe("2025");
+  });
+});
+
+describe("AI Scoring & Ranking (Section 15.1)", () => {
+  it("ranks an event matching date + keyword + type above keyword-only", () => {
+    const fixedNow = new Date("2026-10-15T12:00:00Z");
+    const filter = parseSearchQueryRuleBased(
+      "AI workshop I attended in March 2026",
+      ["Main Seminar Hall"],
+      fixedNow
+    );
+
+    const mockEvents = [
+      {
+        id: "ev-1",
+        facultyId: "fac-1",
+        title: "AI Workshop on Deep Learning",
+        type: EventType.HOSTED,
+        startAt: new Date("2024-01-10T10:00:00Z"),
+        endAt: new Date("2024-01-10T12:00:00Z"),
+        allDay: false,
+        location: "Room 101",
+        department: "Computer Science",
+        organizer: null,
+        role: null,
+        description: null,
+        attachmentUrl: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+      {
+        id: "ev-2",
+        facultyId: "fac-1",
+        title: "AI Workshop on Agents",
+        type: EventType.ATTENDED,
+        startAt: new Date("2026-03-15T10:00:00Z"),
+        endAt: new Date("2026-03-15T12:00:00Z"),
+        allDay: false,
+        location: "Main Seminar Hall",
+        department: "Computer Science",
+        organizer: null,
+        role: null,
+        description: null,
+        attachmentUrl: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ];
+
+    const ranked = scoreAndRankEvents(mockEvents, filter);
+    expect(ranked.length).toBe(2);
+    expect(ranked[0].event.id).toBe("ev-2");
+    expect(ranked[0].score).toBeGreaterThan(ranked[1].score);
+  });
+});
+
+describe("Achievements Metrics & Badges (Section 15.1)", () => {
+  it("calculates exact counts and unlocks expected badges", () => {
+    const events = [
+      {
+        type: EventType.HOSTED,
+        startAt: new Date("2026-01-15T10:00:00Z"),
+        endAt: new Date("2026-01-15T12:00:00Z"),
+        department: "Computer Science",
+      },
+      {
+        type: EventType.ATTENDED,
+        startAt: new Date("2026-02-15T10:00:00Z"),
+        endAt: new Date("2026-02-15T12:00:00Z"),
+        department: "Mathematics",
+      },
+      {
+        type: EventType.BUSY,
+        startAt: new Date("2026-03-10T09:00:00Z"),
+        endAt: new Date("2026-03-10T17:00:00Z"),
+        department: "Physics",
+      },
+    ];
+
+    const res = calculateAchievementsFromEvents(events, new Date("2026-10-15T12:00:00Z"));
+    expect(res.metrics.totalHosted).toBe(1);
+    expect(res.metrics.totalAttended).toBe(1);
+    expect(res.metrics.totalBusyDays).toBe(1);
+    expect(res.metrics.totalEvents).toBe(3);
+    expect(res.metrics.departmentsEngaged).toBe(3);
+    expect(res.metrics.activeMonthsStreak).toBe(3);
+
+    const hostStarter = res.badges.find((b) => b.id === "host-starter");
+    const crossDisciplinary = res.badges.find((b) => b.id === "cross-disciplinary");
+    expect(hostStarter?.earned).toBe(true);
+    expect(crossDisciplinary?.earned).toBe(true);
+  });
+});
+
+describe("Password & Faculty ID Validation Rules (Section 15.1)", () => {
+  it("validates faculty ID pattern and password strength", () => {
+    expect(facultyCodeRule.safeParse("DEMO-001").success).toBe(true);
+    expect(facultyCodeRule.safeParse("ab").success).toBe(false);
+
+    expect(passwordRule.safeParse("StrongPass1").success).toBe(true);
+    expect(passwordRule.safeParse("short1").success).toBe(false);
+    expect(passwordRule.safeParse("onlyletters").success).toBe(false);
+  });
+});
+
+=== middleware.ts ===
+import { NextRequest, NextResponse } from "next/server";
+import { APP_CONFIG } from "@/config/constants";
+import { verifySessionToken } from "@/lib/auth/jwt";
+
+const PROTECTED_PREFIXES = [
+  "/dashboard",
+  "/events",
+  "/calendar",
+  "/achievements",
+  "/reports",
+  "/assistant",
+  "/profile",
+];
+
+/**
+ * F1.9: Protected routes redirect to /login with a `next` parameter when
+ * no valid session exists.
+ */
+export async function middleware(req: NextRequest) {
+  const { pathname, search } = req.nextUrl;
+  const isProtected = PROTECTED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+  );
+
+  if (!isProtected) {
+    return NextResponse.next();
+  }
+
+  const token = req.cookies.get(APP_CONFIG.sessionCookieName)?.value;
+  const session = token ? await verifySessionToken(token) : null;
+
+  if (!session) {
+    const loginUrl = new URL("/login", req.url);
+    loginUrl.searchParams.set("next", `${pathname}${search}`);
+    return NextResponse.redirect(loginUrl);
+  }
+
+  return NextResponse.next();
+}
+
+export const config = {
+  matcher: [
+    "/dashboard/:path*",
+    "/events/:path*",
+    "/calendar/:path*",
+    "/achievements/:path*",
+    "/reports/:path*",
+    "/assistant/:path*",
+    "/profile/:path*",
+  ],
+};
+
+=== package.json ===
+{
+  "name": "facultypulse",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "prisma generate && prisma migrate deploy && next build",
+    "start": "next start",
+    "lint": "next lint",
+    "postinstall": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:push": "prisma db push",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:seed:reset": "tsx prisma/seed.ts --reset",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "@radix-ui/react-dialog": "^1.1.2",
+    "@radix-ui/react-dropdown-menu": "^2.1.2",
+    "@radix-ui/react-label": "^2.1.0",
+    "@radix-ui/react-select": "^2.1.2",
+    "@radix-ui/react-slot": "^1.1.0",
+    "@radix-ui/react-switch": "^1.1.1",
+    "@radix-ui/react-tabs": "^1.1.1",
+    "bcryptjs": "^2.4.3",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "date-fns": "^3.6.0",
+    "date-fns-tz": "^3.2.0",
+    "jose": "^5.9.6",
+    "lucide-react": "^0.460.0",
+    "next": "^15.0.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "recharts": "^2.13.3",
+    "tailwind-merge": "^2.5.4",
+    "xlsx": "^0.18.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.2",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^22.9.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^9.14.0",
+    "eslint-config-next": "^15.0.3",
+    "postcss": "^8.4.47",
+    "prisma": "^5.22.0",
+    "tailwindcss": "^3.4.14",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}
+
