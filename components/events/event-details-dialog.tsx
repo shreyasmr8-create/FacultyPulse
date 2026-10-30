@@ -70,23 +70,23 @@ export function EventDetailsDialog({
 
   const typeConfig = {
     HOSTED: {
-      label: "HOSTED (Organized)",
-      badgeClass: "bg-blue-100 text-blue-800 border-blue-200",
+      label: "Hosted Session",
+      badgeClass: "bg-blue-50 text-blue-700 border-blue-200/80",
       dotClass: "bg-blue-600",
     },
     ATTENDED: {
-      label: "ATTENDED (Participant)",
-      badgeClass: "bg-emerald-100 text-emerald-800 border-emerald-200",
+      label: "Attended Event",
+      badgeClass: "bg-emerald-50 text-emerald-700 border-emerald-200/80",
       dotClass: "bg-emerald-600",
     },
     BUSY: {
-      label: "BUSY (Slot Blocked)",
-      badgeClass: "bg-amber-100 text-amber-800 border-amber-200",
+      label: "Busy / Reserved Slot",
+      badgeClass: "bg-amber-50 text-amber-700 border-amber-200/80",
       dotClass: "bg-amber-600",
     },
   }[event.type] || {
     label: event.type,
-    badgeClass: "bg-slate-100 text-slate-800 border-slate-200",
+    badgeClass: "bg-slate-100 text-slate-700 border-slate-200",
     dotClass: "bg-slate-600",
   };
 
@@ -156,27 +156,40 @@ export function EventDetailsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl p-0 overflow-hidden rounded-xl border border-slate-200 shadow-2xl">
-        {/* Header Bar */}
-        <div className="bg-slate-900 px-6 py-5 text-white">
-          <div className="flex items-center gap-2 mb-2">
+      <DialogContent className="max-w-xl p-0 overflow-hidden rounded-2xl border border-slate-200/90 shadow-2xl bg-white">
+        {/* Clean Human-Crafted Academic Header */}
+        <div className="p-6 pb-4 border-b border-slate-100 bg-gradient-to-b from-slate-50/70 to-white">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
             <span
-              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold ${typeConfig.badgeClass}`}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${typeConfig.badgeClass}`}
             >
               <span className={`h-1.5 w-1.5 rounded-full ${typeConfig.dotClass}`} />
               {typeConfig.label}
             </span>
-            {event.allDay && (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700">
-                All Day
+            {event.allDay ? (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
+                All-Day Commitment
+              </span>
+            ) : null}
+            {event.department && (
+              <span className="text-xs text-slate-500 font-medium">
+                • {event.department}
               </span>
             )}
           </div>
-          <DialogTitle className="text-xl font-bold tracking-tight text-white leading-snug">
+          <DialogTitle className="text-xl font-bold tracking-tight text-slate-900 leading-snug">
             {event.title}
           </DialogTitle>
-          <DialogDescription className="text-slate-400 text-xs mt-1">
-            Recorded event reference #{event.id}
+          <DialogDescription className="text-slate-500 text-xs mt-1.5 flex items-center gap-1.5 font-normal">
+            <span>Academic Schedule Record</span>
+            <span>•</span>
+            <span>{format(startDate, "MMMM yyyy")}</span>
+            {event.location ? (
+              <>
+                <span>•</span>
+                <span>{event.location}</span>
+              </>
+            ) : null}
           </DialogDescription>
         </div>
 
@@ -201,68 +214,76 @@ export function EventDetailsDialog({
         )}
 
         {/* Content Body */}
-        <div className="px-6 py-4 space-y-5 max-h-[65vh] overflow-y-auto">
+        <div className="px-6 py-4 space-y-4 max-h-[65vh] overflow-y-auto">
           {/* Timing Section */}
-          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-2">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <div className="bg-slate-50/70 border border-slate-200/70 rounded-xl p-3.5 space-y-2">
+            <div className="flex items-center gap-2 text-xs font-semibold tracking-wide text-slate-700">
               <Calendar className="h-3.5 w-3.5 text-blue-600" />
-              <span>Schedule & Duration</span>
+              <span>Date & Schedule</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-slate-800">
-              <div>
-                <span className="text-xs text-slate-500 block">Starts:</span>
-                <span className="font-medium">
+              <div className="bg-white p-2.5 rounded-lg border border-slate-100 shadow-2xs">
+                <span className="text-[11px] text-slate-500 block uppercase font-medium">Starts</span>
+                <span className="font-semibold text-slate-900">
                   {format(startDate, "EEE, MMM d, yyyy")}
-                  {!event.allDay && ` • ${format(startDate, "h:mm a")}`}
                 </span>
+                {!event.allDay && (
+                  <span className="text-xs text-slate-600 block mt-0.5">
+                    {format(startDate, "h:mm a")}
+                  </span>
+                )}
               </div>
-              <div>
-                <span className="text-xs text-slate-500 block">Ends:</span>
-                <span className="font-medium">
+              <div className="bg-white p-2.5 rounded-lg border border-slate-100 shadow-2xs">
+                <span className="text-[11px] text-slate-500 block uppercase font-medium">Ends</span>
+                <span className="font-semibold text-slate-900">
                   {format(endDate, "EEE, MMM d, yyyy")}
-                  {!event.allDay && ` • ${format(endDate, "h:mm a")}`}
                 </span>
+                {!event.allDay && (
+                  <span className="text-xs text-slate-600 block mt-0.5">
+                    {format(endDate, "h:mm a")}
+                  </span>
+                )}
               </div>
             </div>
           </div>
 
           {/* Details Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
             {event.department && (
-              <div className="flex items-start gap-2.5 p-2.5 rounded-lg border border-slate-100 bg-white">
+              <div className="flex items-start gap-2.5 p-3 rounded-xl border border-slate-100 bg-slate-50/40">
                 <Building2 className="h-4 w-4 text-purple-600 shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-xs text-slate-500 font-medium">Department</p>
+                  <p className="text-[11px] text-slate-500 font-medium">Department</p>
                   <p className="font-semibold text-slate-900">{event.department}</p>
                 </div>
               </div>
             )}
 
             {event.location && (
-              <div className="flex items-start gap-2.5 p-2.5 rounded-lg border border-slate-100 bg-white">
+              <div className="flex items-start gap-2.5 p-3 rounded-xl border border-slate-100 bg-slate-50/40">
                 <MapPin className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-xs text-slate-500 font-medium">Location / Venue</p>
+                  <p className="text-[11px] text-slate-500 font-medium">Location & Venue</p>
                   <p className="font-semibold text-slate-900">{event.location}</p>
                 </div>
               </div>
             )}
 
             {event.organizer && (
-              <div className="flex items-start gap-2.5 p-2.5 rounded-lg border border-slate-100 bg-white">
+              <div className="flex items-start gap-2.5 p-3 rounded-xl border border-slate-100 bg-slate-50/40">
                 <Users className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-xs text-slate-500 font-medium">Organizer</p>
+                  <p className="text-[11px] text-slate-500 font-medium">Organizer</p>
                   <p className="font-semibold text-slate-900">{event.organizer}</p>
                 </div>
               </div>
             )}
 
             {event.role && (
-              <div className="flex items-start gap-2.5 p-2.5 rounded-lg border border-slate-100 bg-white">
+              <div className="flex items-start gap-2.5 p-3 rounded-xl border border-slate-100 bg-slate-50/40">
                 <Briefcase className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-xs text-slate-500 font-medium">Faculty Role</p>
+                  <p className="text-[11px] text-slate-500 font-medium">Faculty Role</p>
                   <p className="font-semibold text-slate-900">{event.role}</p>
                 </div>
               </div>
@@ -271,10 +292,10 @@ export function EventDetailsDialog({
 
           {/* Description / Notes */}
           <div className="space-y-1.5">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-              <FileText className="h-3.5 w-3.5 text-slate-400" /> Description & Academic Notes
+            <span className="text-xs font-semibold tracking-wide text-slate-700 flex items-center gap-1.5">
+              <FileText className="h-3.5 w-3.5 text-slate-500" /> Notes & Discussion Points
             </span>
-            <div className="bg-slate-50 rounded-lg p-3 text-sm text-slate-700 border border-slate-200 min-h-[60px] whitespace-pre-wrap">
+            <div className="bg-slate-50/60 rounded-xl p-3.5 text-sm text-slate-700 border border-slate-200/80 min-h-[60px] whitespace-pre-wrap leading-relaxed">
               {event.description || (
                 <span className="text-slate-400 italic">No additional notes filed for this event.</span>
               )}
@@ -311,14 +332,14 @@ export function EventDetailsDialog({
         </div>
 
         {/* Footer Actions */}
-        <DialogFooter className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row gap-2 sm:justify-between items-center">
+        <DialogFooter className="px-6 py-3.5 bg-slate-50/80 border-t border-slate-100 flex flex-col sm:flex-row gap-2 sm:justify-between items-center">
           <Button
             type="button"
             variant="ghost"
             size="sm"
             onClick={handleDelete}
             disabled={deleting}
-            className="text-red-600 hover:text-red-700 hover:bg-red-50 text-xs gap-1.5"
+            className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 text-xs gap-1.5 h-8 font-medium"
           >
             {deleting ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -335,12 +356,12 @@ export function EventDetailsDialog({
               size="sm"
               onClick={handleDuplicate}
               disabled={duplicating}
-              className="text-xs gap-1.5"
+              className="text-xs gap-1.5 h-8 font-medium border-slate-200 hover:bg-slate-100 text-slate-700"
             >
               {duplicating ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : (
-                <Copy className="h-3.5 w-3.5" />
+                <Copy className="h-3.5 w-3.5 text-slate-500" />
               )}
               <span>Duplicate (+7d)</span>
             </Button>
@@ -348,9 +369,9 @@ export function EventDetailsDialog({
               type="button"
               size="sm"
               onClick={() => onOpenChange(false)}
-              className="text-xs"
+              className="text-xs h-8 px-4 font-medium bg-slate-900 hover:bg-slate-800 text-white"
             >
-              Close
+              Done
             </Button>
           </div>
         </DialogFooter>
