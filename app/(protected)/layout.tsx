@@ -26,6 +26,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { FacultyAmbientBackground } from "@/components/ui/faculty-ambient-background";
 
 interface FacultyProfile {
   id: string;
@@ -84,8 +85,8 @@ export default function ProtectedLayout({
   return (
     <div className="flex min-h-screen bg-slate-50 text-slate-900">
       {/* Desktop Sidebar */}
-      <aside className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 border-r border-slate-200 bg-white">
-        <div className="flex h-16 items-center px-6 border-b border-slate-100 gap-3">
+      <aside className="hidden md:flex md:w-64 md:flex-col md:fixed md:inset-y-0 z-30 border-r border-slate-200 bg-white shadow-xs">
+        <div className="flex h-16 items-center px-6 border-b border-slate-100 gap-3 bg-white">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white shadow-sm">
             <GraduationCap className="h-5 w-5" />
           </div>
@@ -95,16 +96,16 @@ export default function ProtectedLayout({
           </div>
         </div>
 
-        <div className="px-4 py-4">
+        <div className="px-4 py-4 bg-white">
           <Link href="/events/new">
-            <Button className="w-full justify-center gap-2 shadow-sm">
+            <Button className="w-full justify-center gap-2 shadow-sm bg-blue-600 hover:bg-blue-700 text-white font-semibold">
               <PlusCircle className="h-4 w-4" />
               <span>Record Event</span>
             </Button>
           </Link>
         </div>
 
-        <nav className="flex-1 space-y-1 px-3 py-2">
+        <nav className="flex-1 space-y-1 px-3 py-2 bg-white">
           {NAV_ITEMS.map((item) => {
             const Icon = item.icon;
             const active =
@@ -115,13 +116,13 @@ export default function ProtectedLayout({
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-all ${
                   active
-                    ? "bg-blue-50 text-blue-700 font-semibold"
-                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                    ? "bg-blue-600 text-white shadow-xs"
+                    : "text-slate-700 hover:bg-slate-100 hover:text-slate-900"
                 }`}
               >
-                <Icon className={`h-4 w-4 ${active ? "text-blue-700" : "text-slate-400"}`} />
+                <Icon className={`h-4 w-4 ${active ? "text-white" : "text-slate-500"}`} />
                 {item.label}
               </Link>
             );
@@ -129,7 +130,7 @@ export default function ProtectedLayout({
         </nav>
 
         {/* User profile dropdown in sidebar footer */}
-        <div className="p-3 border-t border-slate-100">
+        <div className="p-3 border-t border-slate-100 bg-white">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-slate-100 transition-colors">
@@ -218,8 +219,9 @@ export default function ProtectedLayout({
       )}
 
       {/* Main Content Area */}
-      <main className="flex-1 md:pl-64 flex flex-col min-h-screen">
-        <div className="flex-1 p-6 md:p-8 pt-18 md:pt-8 max-w-7xl w-full mx-auto">
+      <main className="flex-1 md:pl-64 flex flex-col min-h-screen relative">
+        <FacultyAmbientBackground />
+        <div className="flex-1 p-6 md:p-8 pt-18 md:pt-8 max-w-7xl w-full mx-auto relative z-10">
           {children}
         </div>
       </main>

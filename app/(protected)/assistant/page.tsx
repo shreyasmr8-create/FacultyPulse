@@ -14,8 +14,12 @@ import {
   MapPin,
   Building2,
   Sparkles,
-  HelpCircle
+  HelpCircle,
+  FileText,
+  ExternalLink,
+  Eye
 } from "lucide-react";
+import { EventDetailsDialog } from "@/components/events/event-details-dialog";
 
 interface SearchResultEvent {
   id: string;
@@ -23,8 +27,13 @@ interface SearchResultEvent {
   type: "HOSTED" | "ATTENDED" | "BUSY";
   startAt: string;
   endAt: string;
+  allDay: boolean;
   location?: string | null;
   department?: string | null;
+  organizer?: string | null;
+  role?: string | null;
+  description?: string | null;
+  attachmentUrl?: string | null;
   score?: number;
   matchReasons?: string[];
 }
@@ -55,6 +64,7 @@ export default function AssistantPage() {
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState<SearchResultEvent | null>(null);
 
   const handleSend = async (queryText?: string) => {
     const textToSend = (queryText || input).trim();
@@ -167,15 +177,28 @@ export default function AssistantPage() {
                       return (
                         <div
                           key={ev.id}
-                          className="rounded-lg border border-slate-200 bg-white p-3 text-slate-900 shadow-xs hover:border-blue-300 transition-colors"
+                          onClick={() => setSelectedEvent(ev)}
+                          className="rounded-lg border border-slate-200 bg-white p-3.5 text-slate-900 shadow-xs hover:border-blue-400 hover:shadow-sm transition-all cursor-pointer group"
                         >
                           <div className="flex items-start justify-between gap-2">
-                            <h4 className="font-semibold text-sm text-slate-900">{ev.title}</h4>
-                            <span
-                              className={`shrink-0 rounded px-2 py-0.5 text-[10px] font-semibold border ${typeBadge}`}
-                            >
-                              {ev.type}
-                            </span>
+                            <h4 className="font-semibold text-sm text-slate-900 group-hover:text-blue-600 transition-colors">
+                              {ev.title}
+                            </h4>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span
+                                className={`rounded px-2 py-0.5 text-[10px] font-semibold border ${typeBadge}`}
+                              >
+                                {ev.type}
+                              </span>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-1.5 text-xs text-blue-600 opacity-80 group-hover:opacity-100"
+                              >
+                                <Eye className="h-3 w-3 mr-1" />
+                                <span>Details</span>
+                              </Button>
+                            </div>
                           </div>
 
                           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-500">
@@ -196,6 +219,25 @@ export default function AssistantPage() {
                               </span>
                             )}
                           </div>
+
+                          {/* Direct Attached File Pill if Present */}
+                          {ev.attachmentUrl && (
+                            <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between">
+                              <span className="text-[11px] text-slate-500 flex items-center gap-1">
+                                <FileText className="h-3 w-3 text-blue-600" /> Attached document available
+                              </span>
+                              <a
+                                href={ev.attachmentUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-600 hover:text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 hover:bg-blue-100 transition-colors"
+                              >
+                                <span>Get File</span>
+                                <ExternalLink className="h-2.5 w-2.5" />
+                              </a>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -268,6 +310,15 @@ export default function AssistantPage() {
           </form>
         </div>
       </Card>
+
+      {/* Reusable Event Details Dialog */}
+      <EventDetailsDialog
+        event={selectedEvent}
+        open={Boolean(selectedEvent)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedEvent(null);
+        }}
+      />
     </div>
   );
 }

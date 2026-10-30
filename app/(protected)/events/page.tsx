@@ -24,8 +24,10 @@ import {
   AlertTriangle,
   CheckCircle2,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Eye
 } from "lucide-react";
+import { EventDetailsDialog } from "@/components/events/event-details-dialog";
 
 interface FacultyEvent {
   id: string;
@@ -37,11 +39,15 @@ interface FacultyEvent {
   location?: string | null;
   department?: string | null;
   organizer?: string | null;
+  role?: string | null;
+  description?: string | null;
+  attachmentUrl?: string | null;
 }
 
 export default function EventsListPage() {
   const [events, setEvents] = useState<FacultyEvent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedEvent, setSelectedEvent] = useState<FacultyEvent | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("ALL");
   const [page, setPage] = useState(1);
@@ -254,9 +260,15 @@ export default function EventsListPage() {
                       : "bg-amber-100 text-amber-800 border-amber-200";
 
                   return (
-                    <TableRow key={ev.id}>
+                    <TableRow
+                      key={ev.id}
+                      className="cursor-pointer hover:bg-blue-50/50 transition-colors"
+                      onClick={() => setSelectedEvent(ev)}
+                    >
                       <TableCell className="font-semibold text-slate-900">
-                        {ev.title}
+                        <span className="hover:text-blue-600 transition-colors">
+                          {ev.title}
+                        </span>
                       </TableCell>
                       <TableCell>
                         <span
@@ -270,8 +282,17 @@ export default function EventsListPage() {
                       </TableCell>
                       <TableCell className="text-slate-600">{ev.department || "—"}</TableCell>
                       <TableCell className="text-slate-600">{ev.location || "—"}</TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            title="View event details"
+                            onClick={() => setSelectedEvent(ev)}
+                            className="h-8 w-8 p-0 text-slate-600 hover:text-blue-600"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
                           <Button
                             variant="ghost"
                             size="sm"
@@ -327,6 +348,16 @@ export default function EventsListPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Event Details Dialog */}
+      <EventDetailsDialog
+        event={selectedEvent}
+        open={Boolean(selectedEvent)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedEvent(null);
+        }}
+        onEventUpdated={fetchEvents}
+      />
     </div>
   );
 }

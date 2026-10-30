@@ -47,14 +47,39 @@ export function scoreAndRankEvents(
     }
 
     const titleLower = ev.title.toLowerCase();
-    const secondaryBlob = [ev.description, ev.organizer, ev.location]
+    const secondaryBlob = [
+      ev.description,
+      ev.organizer,
+      ev.location,
+      ev.department,
+      ev.role,
+      ev.attachmentUrl,
+    ]
       .filter(Boolean)
       .join(" ")
       .toLowerCase();
 
+    const fileQueryKeywords = new Set([
+      "file",
+      "files",
+      "attachment",
+      "attachments",
+      "document",
+      "documents",
+      "certificate",
+      "slides",
+      "pdf",
+    ]);
+
     for (const kw of filter.keywords) {
       const kwLower = kw.toLowerCase();
       let matchedKw = false;
+
+      if (fileQueryKeywords.has(kwLower) && ev.attachmentUrl) {
+        score += 20;
+        reasons.push("has attached file");
+        matchedKw = true;
+      }
 
       if (titleLower.includes(kwLower)) {
         score += 15;
@@ -64,7 +89,7 @@ export function scoreAndRankEvents(
         score += 5;
         matchedKw = true;
       }
-      if (matchedKw) {
+      if (matchedKw && !fileQueryKeywords.has(kwLower)) {
         reasons.push(kw);
       }
     }

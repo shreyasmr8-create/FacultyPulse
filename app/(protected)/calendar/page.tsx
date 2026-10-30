@@ -23,6 +23,7 @@ import {
   Clock,
   MapPin
 } from "lucide-react";
+import { EventDetailsDialog } from "@/components/events/event-details-dialog";
 
 interface CalendarEvent {
   id: string;
@@ -30,14 +31,20 @@ interface CalendarEvent {
   type: "HOSTED" | "ATTENDED" | "BUSY";
   startAt: string;
   endAt: string;
+  allDay: boolean;
   location?: string | null;
   department?: string | null;
+  organizer?: string | null;
+  role?: string | null;
+  description?: string | null;
+  attachmentUrl?: string | null;
 }
 
 export default function CalendarPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [groupedEvents, setGroupedEvents] = useState<Record<string, CalendarEvent[]>>({});
   const [loading, setLoading] = useState(true);
+  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [selectedDayEvents, setSelectedDayEvents] = useState<{
     dateStr: string;
     events: CalendarEvent[];
@@ -189,8 +196,12 @@ export default function CalendarPage() {
                         return (
                           <div
                             key={ev.id}
-                            className={`truncate rounded px-1.5 py-0.5 text-[10px] font-medium ${typeBg}`}
-                            title={ev.title}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedEvent(ev);
+                            }}
+                            className={`truncate rounded px-1.5 py-0.5 text-[10px] font-medium ${typeBg} cursor-pointer hover:opacity-85 transition-opacity shadow-xs`}
+                            title={`${ev.title} (Click to view full details)`}
                           >
                             {ev.title}
                           </div>
@@ -230,10 +241,13 @@ export default function CalendarPage() {
             {selectedDayEvents.events.map((ev) => (
               <div
                 key={ev.id}
-                className="flex items-center justify-between p-3 rounded-lg bg-white border border-slate-200"
+                onClick={() => setSelectedEvent(ev)}
+                className="flex items-center justify-between p-3 rounded-lg bg-white border border-slate-200 hover:border-blue-300 hover:shadow-xs transition-all cursor-pointer group"
               >
                 <div>
-                  <h4 className="font-semibold text-sm text-slate-900">{ev.title}</h4>
+                  <h4 className="font-semibold text-sm text-slate-900 group-hover:text-blue-600 transition-colors">
+                    {ev.title}
+                  </h4>
                   <div className="flex items-center gap-3 text-xs text-slate-500 mt-1">
                     <span className="flex items-center gap-1">
                       <Clock className="h-3.5 w-3.5" />
@@ -247,22 +261,40 @@ export default function CalendarPage() {
                     )}
                   </div>
                 </div>
-                <span
-                  className={`px-2 py-0.5 rounded text-xs font-semibold ${
-                    ev.type === "HOSTED"
-                      ? "bg-blue-100 text-blue-800"
-                      : ev.type === "ATTENDED"
-                      ? "bg-emerald-100 text-emerald-800"
-                      : "bg-amber-100 text-amber-800"
-                  }`}
-                >
-                  {ev.type}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`px-2 py-0.5 rounded text-xs font-semibold ${
+                      ev.type === "HOSTED"
+                        ? "bg-blue-100 text-blue-800"
+                        : ev.type === "ATTENDED"
+                        ? "bg-emerald-100 text-emerald-800"
+                        : "bg-amber-100 text-amber-800"
+                    }`}
+                  >
+                    {ev.type}
+                  </span>
+                  <Button variant="ghost" size="sm" className="text-xs h-7 px-2 text-blue-600">
+                    View
+                  </Button>
+                </div>
               </div>
             ))}
           </CardContent>
         </Card>
       )}
+
+      {/* Event Details Dialog */}
+      <EventDetailsDialog
+        event={selectedEvent}
+        open={Boolean(selectedEvent)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedEvent(null);
+        }}
+        onEventUpdated={() => {
+          // Re-trigger load by re-setting currentDate
+          setCurrentDate(new Date(currentDate));
+        }}
+      />
     </div>
   );
 }

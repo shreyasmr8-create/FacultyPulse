@@ -5,6 +5,8 @@ import Link from "next/link";
 import { format } from "date-fns";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { SparklesText } from "@/components/ui/sparkles-text";
+import { EventDetailsDialog } from "@/components/events/event-details-dialog";
 import {
   CalendarDays,
   Award,
@@ -28,6 +30,9 @@ interface EventItem {
   location?: string | null;
   department?: string | null;
   organizer?: string | null;
+  role?: string | null;
+  description?: string | null;
+  attachmentUrl?: string | null;
 }
 
 interface AchievementsData {
@@ -50,31 +55,32 @@ export default function DashboardPage() {
   const [events, setEvents] = useState<EventItem[]>([]);
   const [achievements, setAchievements] = useState<AchievementsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedEvent, setSelectedEvent] = useState<EventItem | null>(null);
+
+  const loadDashboardData = async () => {
+    try {
+      const [eventsRes, achievementsRes] = await Promise.all([
+        fetch("/api/events?preset=this_week"),
+        fetch("/api/achievements"),
+      ]);
+
+      if (eventsRes.ok) {
+        const eventsData = await eventsRes.json();
+        setEvents(eventsData.items || []);
+      }
+
+      if (achievementsRes.ok) {
+        const achData = await achievementsRes.json();
+        setAchievements(achData);
+      }
+    } catch (err) {
+      console.error("Dashboard data load error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    async function loadDashboardData() {
-      try {
-        const [eventsRes, achievementsRes] = await Promise.all([
-          fetch("/api/events?preset=this_week"),
-          fetch("/api/achievements"),
-        ]);
-
-        if (eventsRes.ok) {
-          const eventsData = await eventsRes.json();
-          setEvents(eventsData.items || []);
-        }
-
-        if (achievementsRes.ok) {
-          const achData = await achievementsRes.json();
-          setAchievements(achData);
-        }
-      } catch (err) {
-        console.error("Dashboard data load error:", err);
-      } finally {
-        setLoading(false);
-      }
-    }
-
     loadDashboardData();
   }, []);
 
@@ -159,8 +165,14 @@ export default function DashboardPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-slate-900">
-              {metrics?.activeMonthsStreak ?? 0} <span className="text-base font-normal text-slate-500">months</span>
+            <div className="flex items-baseline gap-2">
+              <SparklesText
+                text={String(metrics?.activeMonthsStreak ?? 0)}
+                className="text-3xl font-bold text-slate-900 inline-block"
+                sparklesCount={6}
+                colors={{ first: "#f59e0b", second: "#3b82f6" }}
+              />
+              <span className="text-base font-normal text-slate-500">months</span>
             </div>
             <p className="text-xs text-slate-500 mt-1">Consecutive active months recorded</p>
           </CardContent>
@@ -215,11 +227,14 @@ export default function DashboardPage() {
                 return (
                   <div
                     key={ev.id}
-                    className="flex flex-col sm:flex-row sm:items-center justify-between py-4 gap-3 hover:bg-slate-50/50 rounded-lg px-2 transition-colors"
+                    onClick={() => setSelectedEvent(ev)}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between py-4 gap-3 hover:bg-blue-50/60 rounded-lg px-3 transition-colors cursor-pointer group border border-transparent hover:border-blue-100"
                   >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-semibold text-slate-900 text-base">{ev.title}</span>
+                        <span className="font-semibold text-slate-900 text-base group-hover:text-blue-700 transition-colors">
+                          {ev.title}
+                        </span>
                         <span
                           className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${typeColor}`}
                         >
@@ -250,6 +265,13 @@ export default function DashboardPage() {
                         )}
                       </div>
                     </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-xs shrink-0 group-hover:bg-blue-600 group-hover:text-white group-hover:border-blue-600 transition-all self-start sm:self-center"
+                    >
+                      View Details
+                    </Button>
                   </div>
                 );
               })}
@@ -257,6 +279,16 @@ export default function DashboardPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Reusable Event Details Dialog */}
+      <EventDetailsDialog
+        event={selectedEvent}
+        open={Boolean(selectedEvent)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedEvent(null);
+        }}
+        onEventUpdated={loadDashboardData}
+      />
     </div>
   );
 }

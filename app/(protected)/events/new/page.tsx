@@ -23,6 +23,7 @@ export default function NewEventPage() {
   const [organizer, setOrganizer] = useState("");
   const [role, setRole] = useState("");
   const [description, setDescription] = useState("");
+  const [attachmentUrl, setAttachmentUrl] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +59,7 @@ export default function NewEventPage() {
         organizer: organizer.trim() || undefined,
         role: role.trim() || undefined,
         description: description.trim() || undefined,
+        attachmentUrl: attachmentUrl.trim() || undefined,
       };
 
       const res = await fetch("/api/events", {
@@ -269,6 +271,20 @@ export default function NewEventPage() {
                 onChange={(e) => setDescription(e.target.value)}
                 disabled={submitting}
               />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="attachmentUrl">Document / Attachment URL</Label>
+              <Input
+                id="attachmentUrl"
+                placeholder="e.g. https://drive.google.com/... or Supabase storage link"
+                value={attachmentUrl}
+                onChange={(e) => setAttachmentUrl(e.target.value)}
+                disabled={submitting}
+              />
+              <p className="text-xs text-slate-500">
+                Link event certificates, lecture slides, papers, or attendance files for easy lookup.
+              </p>
             </div>
           </CardContent>
           <CardFooter className="flex justify-end gap-3 border-t border-slate-100 pt-4">

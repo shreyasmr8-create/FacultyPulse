@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Award, CheckCircle2, Lock, Flame, Building2, Calendar, Loader2 } from "lucide-react";
+import { SparklesText } from "@/components/ui/sparkles-text";
 
 interface Badge {
   id: string;
@@ -103,8 +104,14 @@ export default function AchievementsPage() {
             <Flame className="h-4 w-4 text-amber-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-slate-900">
-              {metrics?.activeMonthsStreak ?? 0} <span className="text-sm font-normal text-slate-500">months</span>
+            <div className="flex items-baseline gap-2">
+              <SparklesText
+                text={String(metrics?.activeMonthsStreak ?? 0)}
+                className="text-3xl font-bold text-slate-900 inline-block"
+                sparklesCount={6}
+                colors={{ first: "#f59e0b", second: "#3b82f6" }}
+              />
+              <span className="text-sm font-normal text-slate-500">months</span>
             </div>
             <p className="text-xs text-slate-500 mt-1">Consecutive activity records</p>
           </CardContent>

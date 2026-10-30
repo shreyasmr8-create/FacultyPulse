@@ -252,6 +252,54 @@ export function extractDateRange(
     };
   }
 
+  // Day + Month without year (e.g. "15th march", "15 march")
+  const dmRegex = new RegExp(
+    `\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(${monthNamesPattern})\\b`
+  );
+  const dmMatch = normalized.match(dmRegex);
+  if (dmMatch) {
+    const day = Number(dmMatch[1]);
+    const monthIdx = MONTH_MAP[dmMatch[2]];
+    const specificDate = new Date(currentYear, monthIdx, day);
+    return {
+      ...toUtcRange(specificDate, specificDate),
+      label: dmMatch[0],
+      matchedPhrases: [dmMatch[0]],
+    };
+  }
+
+  // Month + Day without year (e.g. "march 15th", "march 15")
+  const mdRegex = new RegExp(
+    `\\b(${monthNamesPattern})\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`
+  );
+  const mdMatch = normalized.match(mdRegex);
+  if (mdMatch) {
+    const monthIdx = MONTH_MAP[mdMatch[1]];
+    const day = Number(mdMatch[2]);
+    const specificDate = new Date(currentYear, monthIdx, day);
+    return {
+      ...toUtcRange(specificDate, specificDate),
+      label: mdMatch[0],
+      matchedPhrases: [mdMatch[0]],
+    };
+  }
+
+  // Bare month name with optional preposition (e.g. "in march", "during october", "for november", "march events")
+  const bareMonthRegex = new RegExp(
+    `\\b(?:in\\s+|during\\s+|for\\s+|of\\s+)?(${monthNamesPattern})\\b`
+  );
+  const bareMonthMatch = normalized.match(bareMonthRegex);
+  if (bareMonthMatch) {
+    const monthIdx = MONTH_MAP[bareMonthMatch[1]];
+    const mStart = new Date(currentYear, monthIdx, 1);
+    const mEnd = endOfMonth(mStart);
+    return {
+      ...toUtcRange(mStart, mEnd),
+      label: bareMonthMatch[0],
+      matchedPhrases: [bareMonthMatch[0]],
+    };
+  }
+
   const yearMatch = normalized.match(/\b(20\d{2})\b/);
   if (yearMatch) {
     const year = Number(yearMatch[1]);
