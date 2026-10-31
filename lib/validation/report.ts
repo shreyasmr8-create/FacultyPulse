@@ -17,7 +17,7 @@ export const reportQuerySchema = z
       .trim()
       .max(150)
       .default("Semester Activity Report"),
-    format: z.enum(["csv", "xlsx"]).optional(),
+    format: z.enum(["csv", "xlsx", "docx", "pdf", "html"]).optional(),
   })
   .strict()
   .refine((d) => d.to >= d.from, {

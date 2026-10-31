@@ -5,6 +5,7 @@ import { reportQuerySchema } from "@/lib/validation/report";
 import { buildFacultyReport } from "@/lib/reports/build";
 import { generateReportCsv } from "@/lib/reports/csv";
 import { generateReportXlsx } from "@/lib/reports/xlsx";
+import { generateReportDocx } from "@/lib/reports/docx";
 import { apiError, handleZodError, logRequest } from "@/lib/api-response";
 
 export async function GET(req: NextRequest) {
@@ -32,6 +33,19 @@ export async function GET(req: NextRequest) {
     });
 
     const baseFileName = `FacultyPulse_${report.header.facultyCode}_${report.header.from}_to_${report.header.to}`;
+
+    if (format === "docx") {
+      const buffer = await generateReportDocx(report);
+      logRequest(path, 200, startMs);
+      return new NextResponse(new Uint8Array(buffer), {
+        status: 200,
+        headers: {
+          "Content-Type":
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "Content-Disposition": `attachment; filename="${baseFileName}.docx"`,
+        },
+      });
+    }
 
     if (format === "xlsx") {
       const buffer = generateReportXlsx(report);

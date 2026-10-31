@@ -6,6 +6,7 @@ import { formatInAppTz, getCalendarDaysBetween } from "@/lib/time";
 export interface ReportPayload {
   header: {
     title: string;
+    universityName: string;
     facultyName: string;
     facultyCode: string;
     department: string;
@@ -25,12 +26,15 @@ export interface ReportPayload {
     dateFormatted: string;
     startAt: string;
     endAt: string;
+    allDay: boolean;
     title: string;
     type: EventType;
     role: string;
     organizer: string;
     location: string;
     department: string;
+    description: string | null;
+    attachmentUrl: string | null;
   }>;
   footer: string;
 }
@@ -85,12 +89,15 @@ export async function buildFacultyReport(params: {
       ),
       startAt: ev.startAt.toISOString(),
       endAt: ev.endAt.toISOString(),
+      allDay: ev.allDay,
       title: ev.title,
       type: ev.type,
       role: ev.role ?? "-",
       organizer: ev.organizer ?? "-",
       location: ev.location ?? "-",
       department: ev.department ?? "-",
+      description: ev.description ?? null,
+      attachmentUrl: ev.attachmentUrl ?? null,
     };
   });
 
@@ -99,6 +106,7 @@ export async function buildFacultyReport(params: {
   return {
     header: {
       title: params.title || "Semester Activity Report",
+      universityName: process.env.UNIVERSITY_NAME || "Dayananda Sagar University",
       facultyName: faculty.fullName,
       facultyCode: faculty.facultyCode,
       department: faculty.department,

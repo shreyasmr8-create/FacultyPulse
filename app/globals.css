@@ -57,3 +57,21 @@ body {
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
 }
+
+@media print {
+  nav, aside, .no-print, [aria-hidden="true"] {
+    display: none !important;
+  }
+  main {
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  .print-avoid-break {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+}
