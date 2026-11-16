@@ -1,4 +1,4 @@
-import { EventType, Prisma } from "@prisma/client";
+import { EventType, EventCategory, Prisma } from "@prisma/client";
 import { addDays, endOfDay, startOfDay } from "date-fns";
 import { toZonedTime, fromZonedTime } from "date-fns-tz";
 import { prisma } from "@/lib/db";
@@ -16,6 +16,8 @@ export interface EventListFilters {
   from?: Date;
   to?: Date;
   type?: string;
+  category?: string;
+  verificationStatus?: "ALL" | "VERIFIED" | "UNVERIFIED";
   department?: string;
   q?: string;
   page: number;
@@ -74,6 +76,16 @@ export function buildEventWhereClause(
     where.type = parsedTypes[0];
   } else if (parsedTypes.length > 1) {
     where.type = { in: parsedTypes };
+  }
+
+  if (filters.category && filters.category !== "ALL") {
+    where.category = filters.category as EventCategory;
+  }
+
+  if (filters.verificationStatus === "VERIFIED") {
+    where.isVerified = true;
+  } else if (filters.verificationStatus === "UNVERIFIED") {
+    where.isVerified = false;
   }
 
   if (filters.department) {
@@ -136,6 +148,7 @@ export async function createFacultyEvent(
   input: {
     title: string;
     type: EventType;
+    category?: EventCategory;
     startAt: Date;
     endAt: Date;
     allDay: boolean;
@@ -145,6 +158,9 @@ export async function createFacultyEvent(
     role?: string | null;
     description?: string | null;
     attachmentUrl?: string | null;
+    isVerified?: boolean;
+    verifiedAt?: Date | null;
+    verifiedBy?: string | null;
   }
 ) {
   const { startAt, endAt } = normalizeAllDayDates(
@@ -158,6 +174,7 @@ export async function createFacultyEvent(
       facultyId,
       title: input.title,
       type: input.type,
+      category: input.category ?? EventCategory.OTHER,
       startAt,
       endAt,
       allDay: input.allDay,
@@ -167,6 +184,9 @@ export async function createFacultyEvent(
       role: input.role ?? null,
       description: input.description ?? null,
       attachmentUrl: input.attachmentUrl ?? null,
+      isVerified: input.isVerified ?? false,
+      verifiedAt: input.verifiedAt ?? null,
+      verifiedBy: input.verifiedBy ?? null,
     },
   });
 }
@@ -177,6 +197,7 @@ export async function updateFacultyEvent(
   patch: Partial<{
     title: string;
     type: EventType;
+    category: EventCategory;
     startAt: Date;
     endAt: Date;
     allDay: boolean;
@@ -186,10 +207,18 @@ export async function updateFacultyEvent(
     role: string | null;
     description: string | null;
     attachmentUrl: string | null;
+    isVerified: boolean;
+    verifiedAt: Date | null;
+    verifiedBy: string | null;
   }>
 ) {
   const existing = await getFacultyEventById(facultyId, eventId);
   if (!existing) return null;
+
+  // Strict No-Edit Option for Verified Records
+  if (existing.isVerified) {
+    throw new Error("VERIFIED_EVENT_LOCKED");
+  }
 
   const nextAllDay = patch.allDay ?? existing.allDay;
   const rawStart = patch.startAt ?? existing.startAt;
@@ -216,6 +245,14 @@ export async function deleteFacultyEvent(
   facultyId: string,
   eventId: string
 ): Promise<boolean> {
+  const existing = await getFacultyEventById(facultyId, eventId);
+  if (!existing) return false;
+
+  // Strict No-Edit Option for Verified Records
+  if (existing.isVerified) {
+    throw new Error("VERIFIED_EVENT_LOCKED");
+  }
+
   const result = await prisma.event.deleteMany({
     where: {
       id: eventId,
@@ -223,6 +260,25 @@ export async function deleteFacultyEvent(
     },
   });
   return result.count > 0;
+}
+
+export async function verifyFacultyEvent(
+  facultyId: string,
+  eventId: string,
+  verifier: string,
+  verify: boolean = true
+) {
+  const existing = await getFacultyEventById(facultyId, eventId);
+  if (!existing) return null;
+
+  return prisma.event.update({
+    where: { id: existing.id },
+    data: {
+      isVerified: verify,
+      verifiedAt: verify ? new Date() : null,
+      verifiedBy: verify ? verifier : null,
+    },
+  });
 }
 
 export async function duplicateFacultyEvent(

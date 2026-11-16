@@ -18,6 +18,8 @@ export interface AchievementsResult {
     busiestMonth: { month: string; count: number } | null;
     activeMonthsStreak: number;
     departmentsEngaged: number;
+    totalVerified: number;
+    totalUnverified: number;
   };
   eventsPerYear: Array<{ year: string; count: number }>;
   eventsPerMonthLast12: Array<{
@@ -58,13 +60,16 @@ function computeLongestMonthStreak(sortedMonthKeys: string[]): number {
 
 export function calculateAchievementsFromEvents(
   events: Array<
-    Pick<Event, "type" | "startAt" | "endAt" | "department">
+    Pick<Event, "type" | "startAt" | "endAt" | "department"> &
+      Partial<Pick<Event, "isVerified">>
   >,
   referenceNow: Date = new Date()
 ): AchievementsResult {
   let totalHosted = 0;
   let totalAttended = 0;
   let totalBusyEvents = 0;
+  let totalVerified = 0;
+  let totalUnverified = 0;
 
   const busyDaySet = new Set<string>();
   const departmentsSet = new Set<string>();
@@ -73,6 +78,12 @@ export function calculateAchievementsFromEvents(
   const monthsByYear = new Map<string, Set<string>>();
 
   for (const ev of events) {
+    if (ev.isVerified) {
+      totalVerified += 1;
+    } else {
+      totalUnverified += 1;
+    }
+
     if (ev.type === EventType.HOSTED) totalHosted += 1;
     if (ev.type === EventType.ATTENDED) totalAttended += 1;
     if (ev.type === EventType.BUSY) {
@@ -173,6 +184,8 @@ export function calculateAchievementsFromEvents(
       busiestMonth,
       activeMonthsStreak,
       departmentsEngaged: departmentsSet.size,
+      totalVerified,
+      totalUnverified,
     },
     eventsPerYear,
     eventsPerMonthLast12,

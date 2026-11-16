@@ -62,6 +62,14 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       logRequest(path, 400, startMs);
       return handleZodError(err);
     }
+    if (err instanceof Error && err.message === "VERIFIED_EVENT_LOCKED") {
+      logRequest(path, 403, startMs);
+      return apiError(
+        "FORBIDDEN",
+        "This event has been verified and approved. Verified events are locked and cannot be edited.",
+        403
+      );
+    }
     if (err instanceof Error && err.message === "INVALID_DATE_ORDER") {
       logRequest(path, 400, startMs);
       return apiError(
@@ -87,12 +95,25 @@ export async function DELETE(_req: NextRequest, context: RouteContext) {
     return apiError("UNAUTHORIZED", "Authentication required.", 401);
   }
 
-  const deleted = await deleteFacultyEvent(session.facultyId, id);
-  if (!deleted) {
-    logRequest(path, 404, startMs);
-    return apiError("NOT_FOUND", "Event not found.", 404);
-  }
+  try {
+    const deleted = await deleteFacultyEvent(session.facultyId, id);
+    if (!deleted) {
+      logRequest(path, 404, startMs);
+      return apiError("NOT_FOUND", "Event not found.", 404);
+    }
 
-  logRequest(path, 204, startMs);
-  return new NextResponse(null, { status: 204 });
+    logRequest(path, 204, startMs);
+    return new NextResponse(null, { status: 204 });
+  } catch (err) {
+    if (err instanceof Error && err.message === "VERIFIED_EVENT_LOCKED") {
+      logRequest(path, 403, startMs);
+      return apiError(
+        "FORBIDDEN",
+        "This event has been verified and approved. Verified events are locked and cannot be deleted.",
+        403
+      );
+    }
+    logRequest(path, 500, startMs);
+    return apiError("INTERNAL_ERROR", "Failed to delete event.", 500);
+  }
 }

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { EventType } from "@prisma/client";
+import { EventType, EventCategory } from "@prisma/client";
 
 const optionalText = (max: number, label: string) =>
   z
@@ -19,6 +19,7 @@ const baseEventFields = {
   type: z.nativeEnum(EventType, {
     errorMap: () => ({ message: "Type must be ATTENDED, HOSTED, or BUSY." }),
   }),
+  category: z.nativeEnum(EventCategory).default(EventCategory.OTHER),
   startAt: z.coerce.date({
     errorMap: () => ({ message: "Valid start date and time required." }),
   }),
@@ -32,6 +33,9 @@ const baseEventFields = {
   role: optionalText(100, "Role"),
   description: optionalText(2000, "Description"),
   attachmentUrl: optionalText(500, "Attachment URL"),
+  isVerified: z.boolean().optional(),
+  verifiedAt: z.coerce.date().optional().nullable(),
+  verifiedBy: optionalText(100, "Verified By"),
 };
 
 export const createEventSchema = z
@@ -79,6 +83,8 @@ export const listEventsQuerySchema = z
     from: z.coerce.date().optional(),
     to: z.coerce.date().optional(),
     type: z.string().optional(),
+    category: z.string().optional(),
+    verificationStatus: z.enum(["ALL", "VERIFIED", "UNVERIFIED"]).optional(),
     department: z.string().trim().max(100).optional(),
     q: z.string().trim().max(200).optional(),
     page: z.coerce.number().int().min(1).default(1),

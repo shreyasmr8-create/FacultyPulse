@@ -44,7 +44,9 @@ export function generateReportCsv(report: ReportPayload): string {
     [
       "Date",
       "Title",
+      "Category",
       "Type",
+      "Verification Status",
       "Role",
       "Organizer",
       "Location",
@@ -59,7 +61,9 @@ export function generateReportCsv(report: ReportPayload): string {
       [
         ev.dateFormatted,
         ev.title,
+        ev.category,
         ev.type,
+        ev.isVerified ? "Verified (Approved)" : "Non-Verified (Pending)",
         ev.role,
         ev.organizer,
         ev.location,

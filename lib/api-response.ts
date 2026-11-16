@@ -4,6 +4,7 @@ import { ZodError } from "zod";
 export type ErrorCode =
   | "VALIDATION_ERROR"
   | "UNAUTHORIZED"
+  | "FORBIDDEN"
   | "NOT_FOUND"
   | "CONFLICT"
   | "RATE_LIMITED"

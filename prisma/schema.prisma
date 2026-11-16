@@ -14,6 +14,16 @@ enum EventType {
   BUSY
 }
 
+enum EventCategory {
+  CONFERENCE
+  SEMINAR
+  WORKSHOP
+  JOURNAL
+  MEETING
+  GUEST_LECTURE
+  OTHER
+}
+
 model Faculty {
   id           String   @id @default(cuid())
   facultyCode  String   @unique
@@ -28,15 +38,16 @@ model Faculty {
 }
 
 model Event {
-  id            String    @id @default(cuid())
+  id            String        @id @default(cuid())
   facultyId     String
-  faculty       Faculty   @relation(fields: [facultyId], references: [id], onDelete: Cascade)
+  faculty       Faculty       @relation(fields: [facultyId], references: [id], onDelete: Cascade)
 
   title         String
   type          EventType
+  category      EventCategory @default(OTHER)
   startAt       DateTime
   endAt         DateTime
-  allDay        Boolean   @default(false)
+  allDay        Boolean       @default(false)
   location      String?
   department    String?
   organizer     String?
@@ -44,11 +55,15 @@ model Event {
   description   String?
   attachmentUrl String?
 
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  isVerified    Boolean       @default(false)
+  verifiedAt    DateTime?
+  verifiedBy    String?
+
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   @@index([facultyId, startAt])
   @@index([facultyId, type])
+  @@index([facultyId, isVerified])
+  @@index([facultyId, category])
 }
-
-

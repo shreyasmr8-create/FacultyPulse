@@ -37,6 +37,8 @@ export async function GET(req: NextRequest) {
         startAt: true,
         endAt: true,
         department: true,
+        category: true,
+        isVerified: true,
       },
       orderBy: { startAt: "asc" },
     });

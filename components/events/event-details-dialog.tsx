@@ -25,13 +25,20 @@ import {
   Loader2,
   CheckCircle2,
   AlertTriangle,
-  Briefcase
+  Briefcase,
+  ShieldCheck,
+  ShieldAlert,
+  Lock,
+  Tag,
 } from "lucide-react";
+import { ACADEMIC_CATEGORIES } from "@/config/academic";
+import { EventCategory } from "@prisma/client";
 
 export interface EventDetailItem {
   id: string;
   title: string;
   type: "HOSTED" | "ATTENDED" | "BUSY";
+  category?: EventCategory | string | null;
   startAt: string | Date;
   endAt: string | Date;
   allDay: boolean;
@@ -41,6 +48,9 @@ export interface EventDetailItem {
   role?: string | null;
   description?: string | null;
   attachmentUrl?: string | null;
+  isVerified?: boolean | null;
+  verifiedAt?: string | Date | null;
+  verifiedBy?: string | null;
 }
 
 interface EventDetailsDialogProps {
@@ -58,6 +68,8 @@ export function EventDetailsDialog({
 }: EventDetailsDialogProps) {
   const [duplicating, setDuplicating] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [localVerified, setLocalVerified] = useState<boolean | null>(null);
   const [feedback, setFeedback] = useState<{
     type: "success" | "warning" | "error";
     message: string;
@@ -65,17 +77,20 @@ export function EventDetailsDialog({
 
   if (!event) return null;
 
+  const isVerifiedRecord =
+    localVerified !== null ? localVerified : Boolean(event.isVerified);
+
   const startDate = new Date(event.startAt);
   const endDate = new Date(event.endAt);
 
   const typeConfig = {
     HOSTED: {
-      label: "Hosted Session",
+      label: "Hosted / Delivered",
       badgeClass: "bg-blue-50 text-blue-700 border-blue-200/80",
       dotClass: "bg-blue-600",
     },
     ATTENDED: {
-      label: "Attended Event",
+      label: "Attended / Participated",
       badgeClass: "bg-emerald-50 text-emerald-700 border-emerald-200/80",
       dotClass: "bg-emerald-600",
     },
@@ -90,6 +105,11 @@ export function EventDetailsDialog({
     dotClass: "bg-slate-600",
   };
 
+  const categoryConfig =
+    event.category && (event.category as EventCategory) in ACADEMIC_CATEGORIES
+      ? ACADEMIC_CATEGORIES[event.category as EventCategory]
+      : null;
+
   const handleDuplicate = async () => {
     if (!event.id || duplicating) return;
     setDuplicating(true);
@@ -100,19 +120,15 @@ export function EventDetailsDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
+
       const data = await res.json();
       if (res.ok) {
-        if (data.warning) {
-          setFeedback({
-            type: "warning",
-            message: `Duplicated +7 days with overlap warning: ${data.warning}`,
-          });
-        } else {
-          setFeedback({
-            type: "success",
-            message: "Event successfully duplicated +7 days forward!",
-          });
-        }
+        setFeedback({
+          type: data.warning ? "warning" : "success",
+          message: data.warning
+            ? `Duplicated with warning: ${data.warning}`
+            : "Event duplicated (+7 days) successfully!",
+        });
         if (onEventUpdated) onEventUpdated();
       } else {
         setFeedback({
@@ -121,22 +137,63 @@ export function EventDetailsDialog({
         });
       }
     } catch {
-      setFeedback({ type: "error", message: "Network error occurred." });
+      setFeedback({ type: "error", message: "Network error duplicating event." });
     } finally {
       setDuplicating(false);
     }
   };
 
+  const handleVerify = async (verifyStatus: boolean) => {
+    if (!event.id || verifying) return;
+    setVerifying(true);
+    setFeedback(null);
+    try {
+      const res = await fetch(`/api/events/${event.id}/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ verify: verifyStatus }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        setLocalVerified(verifyStatus);
+        setFeedback({
+          type: "success",
+          message: verifyStatus
+            ? "Event verified and approved! Record is now locked against edits."
+            : "Verification revoked.",
+        });
+        if (onEventUpdated) onEventUpdated();
+      } else {
+        setFeedback({
+          type: "error",
+          message: data.error?.message || "Verification failed.",
+        });
+      }
+    } catch {
+      setFeedback({ type: "error", message: "Network error during verification." });
+    } finally {
+      setVerifying(false);
+    }
+  };
+
   const handleDelete = async () => {
-    if (!event.id || deleting) return;
-    if (!confirm("Are you sure you want to delete this recorded event?")) return;
+    if (isVerifiedRecord) {
+      setFeedback({
+        type: "error",
+        message: "Verified events are locked and cannot be deleted.",
+      });
+      return;
+    }
+
+    if (!confirm("Are you sure you want to delete this event? This action cannot be undone.")) {
+      return;
+    }
 
     setDeleting(true);
     setFeedback(null);
     try {
-      const res = await fetch(`/api/events/${event.id}`, {
-        method: "DELETE",
-      });
+      const res = await fetch(`/api/events/${event.id}`, { method: "DELETE" });
       if (res.ok) {
         if (onEventUpdated) onEventUpdated();
         onOpenChange(false);
@@ -157,31 +214,52 @@ export function EventDetailsDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl p-0 overflow-hidden rounded-2xl border border-slate-200/90 shadow-2xl bg-white">
-        {/* Clean Human-Crafted Academic Header */}
+        {/* Header */}
         <div className="p-6 pb-4 border-b border-slate-100 bg-gradient-to-b from-slate-50/70 to-white">
-          <div className="flex items-center gap-2 mb-2 flex-wrap">
+          <div className="flex items-center gap-2 mb-2.5 flex-wrap">
+            {/* Category Badge */}
+            {categoryConfig ? (
+              <span
+                className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${categoryConfig.badgeClass}`}
+              >
+                <Tag className="h-3 w-3" />
+                {categoryConfig.label}
+              </span>
+            ) : null}
+
+            {/* Verification Status Badge */}
+            {isVerifiedRecord ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                <ShieldCheck className="h-3.5 w-3.5 text-emerald-600" />
+                Verified Category (Approved)
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200">
+                <ShieldAlert className="h-3.5 w-3.5 text-amber-600" />
+                Non-Verified (Pending Approval)
+              </span>
+            )}
+
+            {/* Type Badge */}
             <span
-              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${typeConfig.badgeClass}`}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium border ${typeConfig.badgeClass}`}
             >
               <span className={`h-1.5 w-1.5 rounded-full ${typeConfig.dotClass}`} />
               {typeConfig.label}
             </span>
+
             {event.allDay ? (
               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200">
-                All-Day Commitment
+                All-Day
               </span>
             ) : null}
-            {event.department && (
-              <span className="text-xs text-slate-500 font-medium">
-                • {event.department}
-              </span>
-            )}
           </div>
+
           <DialogTitle className="text-xl font-bold tracking-tight text-slate-900 leading-snug">
             {event.title}
           </DialogTitle>
           <DialogDescription className="text-slate-500 text-xs mt-1.5 flex items-center gap-1.5 font-normal">
-            <span>Academic Schedule Record</span>
+            <span>Faculty Activity Record</span>
             <span>•</span>
             <span>{format(startDate, "MMMM yyyy")}</span>
             {event.location ? (
@@ -192,6 +270,27 @@ export function EventDetailsDialog({
             ) : null}
           </DialogDescription>
         </div>
+
+        {/* Locked Banner if Verified */}
+        {isVerifiedRecord && (
+          <div className="mx-6 mt-4 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-950 flex items-start gap-2.5 text-xs">
+            <Lock className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-emerald-900">
+                Verified & Approved Record (Locked)
+              </p>
+              <p className="text-emerald-800/90 mt-0.5">
+                This record has been officially verified and approved. Per institutional policy, <strong>no edit or deletion is permitted</strong> to protect portfolio integrity.
+              </p>
+              {event.verifiedBy && (
+                <p className="text-[11px] text-emerald-700 mt-1 font-mono">
+                  Verified by: {event.verifiedBy}
+                  {event.verifiedAt && ` • ${format(new Date(event.verifiedAt), "MMM d, yyyy h:mm a")}`}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Feedback Alert */}
         {feedback && (
@@ -214,12 +313,12 @@ export function EventDetailsDialog({
         )}
 
         {/* Content Body */}
-        <div className="px-6 py-4 space-y-4 max-h-[65vh] overflow-y-auto">
+        <div className="px-6 py-4 space-y-4 max-h-[60vh] overflow-y-auto">
           {/* Timing Section */}
           <div className="bg-slate-50/70 border border-slate-200/70 rounded-xl p-3.5 space-y-2">
             <div className="flex items-center gap-2 text-xs font-semibold tracking-wide text-slate-700">
               <Calendar className="h-3.5 w-3.5 text-blue-600" />
-              <span>Date & Schedule</span>
+              <span>Schedule & Duration</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-slate-800">
               <div className="bg-white p-2.5 rounded-lg border border-slate-100 shadow-2xs">
@@ -249,6 +348,16 @@ export function EventDetailsDialog({
 
           {/* Details Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+            {event.role && (
+              <div className="flex items-start gap-2.5 p-3 rounded-xl border border-slate-100 bg-slate-50/40">
+                <Briefcase className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-[11px] text-slate-500 font-medium">Academic Role</p>
+                  <p className="font-semibold text-slate-900">{event.role}</p>
+                </div>
+              </div>
+            )}
+
             {event.department && (
               <div className="flex items-start gap-2.5 p-3 rounded-xl border border-slate-100 bg-slate-50/40">
                 <Building2 className="h-4 w-4 text-purple-600 shrink-0 mt-0.5" />
@@ -263,7 +372,7 @@ export function EventDetailsDialog({
               <div className="flex items-start gap-2.5 p-3 rounded-xl border border-slate-100 bg-slate-50/40">
                 <MapPin className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-[11px] text-slate-500 font-medium">Location & Venue</p>
+                  <p className="text-[11px] text-slate-500 font-medium">Location / Venue</p>
                   <p className="font-semibold text-slate-900">{event.location}</p>
                 </div>
               </div>
@@ -273,18 +382,8 @@ export function EventDetailsDialog({
               <div className="flex items-start gap-2.5 p-3 rounded-xl border border-slate-100 bg-slate-50/40">
                 <Users className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-[11px] text-slate-500 font-medium">Organizer</p>
+                  <p className="text-[11px] text-slate-500 font-medium">Organizer / Agency</p>
                   <p className="font-semibold text-slate-900">{event.organizer}</p>
-                </div>
-              </div>
-            )}
-
-            {event.role && (
-              <div className="flex items-start gap-2.5 p-3 rounded-xl border border-slate-100 bg-slate-50/40">
-                <Briefcase className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-[11px] text-slate-500 font-medium">Faculty Role</p>
-                  <p className="font-semibold text-slate-900">{event.role}</p>
                 </div>
               </div>
             )}
@@ -293,7 +392,7 @@ export function EventDetailsDialog({
           {/* Description / Notes */}
           <div className="space-y-1.5">
             <span className="text-xs font-semibold tracking-wide text-slate-700 flex items-center gap-1.5">
-              <FileText className="h-3.5 w-3.5 text-slate-500" /> Notes & Discussion Points
+              <FileText className="h-3.5 w-3.5 text-slate-500" /> Description & Summary
             </span>
             <div className="bg-slate-50/60 rounded-xl p-3.5 text-sm text-slate-700 border border-slate-200/80 min-h-[60px] whitespace-pre-wrap leading-relaxed">
               {event.description || (
@@ -306,7 +405,7 @@ export function EventDetailsDialog({
           {event.attachmentUrl && (
             <div className="space-y-1.5">
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
-                <ExternalLink className="h-3.5 w-3.5 text-blue-600" /> Attached Document / File
+                <ExternalLink className="h-3.5 w-3.5 text-blue-600" /> Attached Certificate / File
               </span>
               <div className="flex items-center justify-between p-3 rounded-lg border border-blue-200 bg-blue-50/50">
                 <div className="flex items-center gap-2 overflow-hidden">
@@ -333,23 +432,64 @@ export function EventDetailsDialog({
 
         {/* Footer Actions */}
         <DialogFooter className="px-6 py-3.5 bg-slate-50/80 border-t border-slate-100 flex flex-col sm:flex-row gap-2 sm:justify-between items-center">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={handleDelete}
-            disabled={deleting}
-            className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 text-xs gap-1.5 h-8 font-medium"
-          >
-            {deleting ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Trash2 className="h-3.5 w-3.5" />
-            )}
-            <span>Delete Event</span>
-          </Button>
+          {/* Left Action: Delete or Lock Indicator */}
+          {isVerifiedRecord ? (
+            <div className="flex items-center gap-1 text-slate-400 text-xs font-medium">
+              <Lock className="h-3.5 w-3.5" />
+              <span>Editing & Deletion Locked</span>
+            </div>
+          ) : (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={handleDelete}
+              disabled={deleting}
+              className="text-rose-600 hover:text-rose-700 hover:bg-rose-50 text-xs gap-1.5 h-8 font-medium"
+            >
+              {deleting ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="h-3.5 w-3.5" />
+              )}
+              <span>Delete Event</span>
+            </Button>
+          )}
 
+          {/* Right Actions: Verify & Approve + Duplicate + Close */}
           <div className="flex items-center gap-2">
+            {!isVerifiedRecord ? (
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => handleVerify(true)}
+                disabled={verifying}
+                className="text-xs gap-1.5 h-8 font-medium bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
+              >
+                {verifying ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                )}
+                <span>Verify & Approve</span>
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => handleVerify(false)}
+                disabled={verifying}
+                className="text-xs text-slate-500 hover:text-amber-700 hover:bg-amber-50 h-8"
+              >
+                {verifying ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <span>Revoke Verification</span>
+                )}
+              </Button>
+            )}
+
             <Button
               type="button"
               variant="outline"
@@ -365,13 +505,14 @@ export function EventDetailsDialog({
               )}
               <span>Duplicate (+7d)</span>
             </Button>
+
             <Button
               type="button"
               size="sm"
               onClick={() => onOpenChange(false)}
               className="text-xs h-8 px-4 font-medium bg-slate-900 hover:bg-slate-800 text-white"
             >
-              Done
+              Close
             </Button>
           </div>
         </DialogFooter>

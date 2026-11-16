@@ -34,7 +34,9 @@ export function generateReportXlsx(report: ReportPayload): Buffer {
   const eventsHeader = [
     "Date",
     "Title",
+    "Category",
     "Type",
+    "Verification Status",
     "Role",
     "Organizer",
     "Location",
@@ -44,7 +46,9 @@ export function generateReportXlsx(report: ReportPayload): Buffer {
   const eventsData = report.events.map((ev) => [
     ev.dateFormatted,
     ev.title,
+    ev.category,
     ev.type,
+    ev.isVerified ? "Verified (Approved)" : "Non-Verified (Pending)",
     ev.role,
     ev.organizer,
     ev.location,

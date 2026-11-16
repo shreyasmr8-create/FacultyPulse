@@ -29,6 +29,8 @@ export interface ReportPayload {
     allDay: boolean;
     title: string;
     type: EventType;
+    category: string;
+    isVerified: boolean;
     role: string;
     organizer: string;
     location: string;
@@ -92,6 +94,8 @@ export async function buildFacultyReport(params: {
       allDay: ev.allDay,
       title: ev.title,
       type: ev.type,
+      category: ev.category || "OTHER",
+      isVerified: ev.isVerified,
       role: ev.role ?? "-",
       organizer: ev.organizer ?? "-",
       location: ev.location ?? "-",
